@@ -13,10 +13,7 @@ builder.Services.AddSingleton<ISearchQuery, AzureSearchQuery>();
 // Entra OAuth is enabled only when configured, so the server can run no-auth locally for testing.
 var tenantId = builder.Configuration["AzureAd:TenantId"];
 var audience = builder.Configuration["AzureAd:Audience"];
-var serverUrl = builder.Configuration["HttpMcpServerUrl"];
-var authEnabled = !string.IsNullOrWhiteSpace(tenantId)
-    && !string.IsNullOrWhiteSpace(audience)
-    && !string.IsNullOrWhiteSpace(serverUrl);
+var authEnabled = !string.IsNullOrWhiteSpace(tenantId) && !string.IsNullOrWhiteSpace(audience);
 
 if (authEnabled)
 {
@@ -36,11 +33,14 @@ if (authEnabled)
         })
         .AddMcp(options =>
         {
+            // Entra rejects a token request whose RFC 8707 resource and scopes resolve to
+            // different resources, so derive BOTH from the app's audience (Application ID URI).
+            // A bare "mcp:tools" scope makes Entra fall back to Microsoft Graph -> AADSTS9010010.
             options.ResourceMetadata = new()
             {
-                Resource = serverUrl!,
+                Resource = audience!,
                 AuthorizationServers = { authority },
-                ScopesSupported = { "mcp:tools" }
+                ScopesSupported = { $"{audience}/mcp:tools" }
             };
         });
 
