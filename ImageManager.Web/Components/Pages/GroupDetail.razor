@@ -215,7 +215,7 @@ else
         => $"/preview/{f.Id}?type={Uri.EscapeDataString(f.MimeType)}";
 
     private string DefaultBlobName(DriveImageFile f, int index)
-        => BlobNaming.DefaultBlobName(_group?.GroupName ?? "", _artist?.Name, f.Name, f.MimeType, index);
+        => CommissionNaming.DefaultBlobName(_group?.GroupName ?? "", _artist?.Name, f.Name, f.MimeType, index);
 
     private async Task SyncSelected()
     {

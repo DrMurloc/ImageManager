@@ -1,5 +1,4 @@
 @using System.Security.Claims
-@using System.Text.RegularExpressions
 @inject IMetadataStore Store
 @inject IDriveScanner Drive
 @inject IDriveUploader Uploader
@@ -112,13 +111,13 @@
         return Task.FromResult(names);
     }
 
-    private bool DescriptionValid => Regex.IsMatch(_description, "^[A-Za-z0-9_]+$");
+    private bool DescriptionValid => CommissionNaming.IsValidDescription(_description);
 
-    private string AlphaArtist() => Regex.Replace(_artistName ?? "", "[^A-Za-z0-9]", "");
+    private string AlphaArtist() => CommissionNaming.SanitizeArtist(_artistName);
 
     private string CollectionName() => _collections?.FirstOrDefault(c => c.Id == _collectionId)?.Name ?? "";
 
-    private string SubfolderName() => $"{_description}_{AlphaArtist()}";
+    private string SubfolderName() => CommissionNaming.SubfolderName(_description, _artistName);
 
     private bool IsNewArtist =>
         !string.IsNullOrWhiteSpace(_artistName)
