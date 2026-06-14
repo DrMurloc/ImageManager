@@ -2,6 +2,7 @@
 @inject IMetadataStore Store
 @inject IDriveScanner Drive
 @inject IBlobSyncService Blob
+@inject IImageSyncService Sync
 @inject IHtmlBuilder Html
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
@@ -217,54 +218,33 @@ else
     private string DefaultBlobName(DriveImageFile f, int index)
         => CommissionNaming.DefaultBlobName(_group?.GroupName ?? "", _artist?.Name, f.Name, f.MimeType, index);
 
-    private async Task SyncSelected()
-    {
-        if (_rows is null || _db is null) return;
-        foreach (var row in _rows.Where(r => r.Selected).ToList())
-            await SyncOne(row, save: false);
-        await Store.SaveAsync(_db);
-        Snackbar.Add("Sync complete.", Severity.Success);
-    }
+    private Task SyncSelected()
+        => SyncRows(_rows?.Where(r => r.Selected).ToList() ?? new(), "Sync complete.");
 
-    private Task SyncOne(ImageRow row) => SyncOne(row, save: true);
+    private Task SyncOne(ImageRow row)
+        => SyncRows(new List<ImageRow> { row }, $"Synced {row.BlobName}.");
 
-    private async Task SyncOne(ImageRow row, bool save)
+    private async Task SyncRows(IReadOnlyList<ImageRow> rows, string successMessage)
     {
-        if (_db is null || _group is null) return;
-        if (string.IsNullOrWhiteSpace(row.BlobName))
-        {
-            Snackbar.Add($"Blob name required for {row.Live.Name}.", Severity.Warning);
-            return;
-        }
+        if (_group is null) return;
+
+        var toSync = rows.Where(r => !string.IsNullOrWhiteSpace(r.BlobName)).ToList();
+        var skipped = rows.Count - toSync.Count;
+        if (skipped > 0)
+            Snackbar.Add($"{skipped} image(s) skipped — blob name required.", Severity.Warning);
+        if (toSync.Count == 0) return;
 
         _busy = true;
         _error = null;
         try
         {
-            var bytes = await Drive.DownloadAsync(row.Live.Id);
-            await Blob.UploadImageAsync(row.BlobName, bytes, row.Live.MimeType);
-
-            var asset = row.Asset;
-            if (asset is null)
-            {
-                asset = new ImageAsset { DriveFileId = row.Live.Id };
-                _group.Images.Add(asset);
-                row.Asset = asset;
-            }
-            asset.SourceFileName = row.Live.Name;
-            asset.BlobName = row.BlobName;
-            asset.Width = row.Live.Width;
-            asset.Height = row.Live.Height;
-            asset.AltText = row.AltText;
-            asset.Synced = true;
-            asset.SyncedAt = DateTimeOffset.UtcNow;
-            asset.SyncedMd5 = row.Live.Md5;
-
-            if (save)
-            {
-                await Store.SaveAsync(_db);
-                Snackbar.Add($"Synced {row.BlobName}.", Severity.Success);
-            }
+            var items = toSync
+                .Select(r => new SyncItem(r.Live.Id, r.Live.Name, r.BlobName, r.AltText,
+                    r.Live.Width, r.Live.Height, r.Live.MimeType, r.Live.Md5))
+                .ToList();
+            await Sync.SyncAsync(_group.DriveFolderId, items);
+            await RefreshAfterSync();
+            Snackbar.Add(successMessage, Severity.Success);
         }
         catch (Exception ex)
         {
@@ -275,6 +255,18 @@ else
         {
             _busy = false;
         }
+    }
+
+    // The sync service persists a freshly-loaded database, so reload ours and re-link each row
+    // to the saved asset, preserving any in-progress blob-name/alt-text edits on the rows.
+    private async Task RefreshAfterSync()
+    {
+        _db = await Store.LoadAsync();
+        _group = _db.Groups.FirstOrDefault(g => g.DriveFolderId == FolderId);
+        _artist = _group?.ArtistId is { } id ? _db.Artists.FirstOrDefault(a => a.Id == id) : null;
+        if (_group is null || _rows is null) return;
+        foreach (var row in _rows)
+            row.Asset = _group.Images.FirstOrDefault(i => i.DriveFileId == row.Live.Id);
     }
 
     private async Task UpdateChapters(ImageRow row, IEnumerable<string> values)

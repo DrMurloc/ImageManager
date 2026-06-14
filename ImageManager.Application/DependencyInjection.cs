@@ -9,6 +9,7 @@ public static class DependencyInjection
     {
         services.AddSingleton<IHtmlBuilder, HtmlBuilder>();
         services.AddScoped<ICommissionGroupService, CommissionGroupService>();
+        services.AddScoped<IImageSyncService, ImageSyncService>();
         return services;
     }
 }

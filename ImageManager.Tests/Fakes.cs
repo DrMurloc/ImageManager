@@ -27,6 +27,40 @@ public sealed class FakeDriveUploader : IDriveUploader
     }
 }
 
+public sealed class FakeDriveScanner : IDriveScanner
+{
+    public byte[] Bytes = { 1, 2, 3 };
+    public readonly List<string> Downloaded = new();
+
+    public Task<byte[]> DownloadAsync(string fileId, CancellationToken ct = default)
+    {
+        Downloaded.Add(fileId);
+        return Task.FromResult(Bytes);
+    }
+
+    public Task<IReadOnlyList<ScannedGroup>> ScanGroupsAsync(CancellationToken ct = default)
+        => throw new NotSupportedException();
+    public Task<IReadOnlyList<DriveFolderRef>> ListCollectionsAsync(CancellationToken ct = default)
+        => throw new NotSupportedException();
+    public Task<IReadOnlyList<DriveImageFile>> ListImagesAsync(string folderId, CancellationToken ct = default)
+        => throw new NotSupportedException();
+    public Task<string?> ReadSourcesDocAsync(CancellationToken ct = default)
+        => throw new NotSupportedException();
+}
+
+public sealed class FakeBlobSyncService : IBlobSyncService
+{
+    public readonly List<(string BlobName, string ContentType, int Bytes)> Uploads = new();
+
+    public Task<string> UploadImageAsync(string blobName, byte[] content, string contentType, CancellationToken ct = default)
+    {
+        Uploads.Add((blobName, contentType, content.Length));
+        return Task.FromResult(GetPublicUrl(blobName));
+    }
+
+    public string GetPublicUrl(string blobName) => $"https://cdn/{blobName}";
+}
+
 public sealed class InMemoryMetadataStore : IMetadataStore
 {
     public CommissionDatabase Db = new();
