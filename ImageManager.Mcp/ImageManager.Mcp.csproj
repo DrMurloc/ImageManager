@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ImageManager.Mcp</RootNamespace>
+    <UserSecretsId>a7e3c1b9-5d24-4f80-9c11-2b6e8f0a1d33</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ImageManager.Application\ImageManager.Application.csproj" />
+    <ProjectReference Include="..\ImageManager.Domain\ImageManager.Domain.csproj" />
+    <ProjectReference Include="..\ImageManager.Infrastructure\ImageManager.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

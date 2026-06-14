@@ -35,6 +35,7 @@ public static class DependencyInjection
         services.AddSingleton<IGoogleUserTokens, GoogleUserTokenStore>();
         services.AddSingleton<IDocxTextExtractor, OpenXmlDocxTextExtractor>();
         services.AddSingleton<ISearchIndex, AzureSearchIndex>();
+        services.AddSingleton<ISearchQuery, AzureSearchQuery>();
 
         return services;
     }
