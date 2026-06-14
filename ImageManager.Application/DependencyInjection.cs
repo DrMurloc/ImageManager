@@ -8,6 +8,7 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddSingleton<IHtmlBuilder, HtmlBuilder>();
+        services.AddScoped<ICommissionGroupService, CommissionGroupService>();
         return services;
     }
 }

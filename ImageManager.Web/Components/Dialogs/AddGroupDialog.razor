@@ -1,7 +1,7 @@
 @using System.Security.Claims
 @inject IMetadataStore Store
 @inject IDriveScanner Drive
-@inject IDriveUploader Uploader
+@inject ICommissionGroupService GroupService
 @inject IGoogleUserTokens Tokens
 @inject AuthenticationStateProvider AuthState
 @inject ISnackbar Snackbar
@@ -153,7 +153,7 @@
 
     private async Task Submit()
     {
-        if (_db is null || !CanSubmit) return;
+        if (!CanSubmit) return;
 
         var token = await Tokens.GetValidAccessTokenAsync(_email);
         if (token is null)
@@ -165,38 +165,19 @@
         _busy = true;
         try
         {
-            var artist = _db.Artists.FirstOrDefault(a =>
-                string.Equals(a.Name.Trim(), _artistName.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (artist is null)
-            {
-                artist = new Artist { Name = _artistName.Trim(), CreditUrl = _newArtistUrl.Trim() };
-                _db.Artists.Add(artist);
-            }
-
-            var subfolder = SubfolderName();
-            var folderId = await Uploader.CreateFolderAsync(token, _collectionId!, subfolder);
-
-            var uploaded = 0;
+            var files = new List<UploadFile>();
             foreach (var file in _files!)
             {
                 await using var stream = file.OpenReadStream(maxAllowedSize: 104_857_600);
                 using var buffer = new MemoryStream();
                 await stream.CopyToAsync(buffer);
-                buffer.Position = 0;
-                await Uploader.UploadAsync(token, folderId, file.Name, file.ContentType, buffer);
-                uploaded++;
+                files.Add(new UploadFile(file.Name, file.ContentType, buffer.ToArray()));
             }
 
-            _db.Groups.Add(new CommissionGroup
-            {
-                DriveFolderId = folderId,
-                CharacterNames = CollectionName(),
-                GroupName = subfolder,
-                ArtistId = artist.Id
-            });
-            await Store.SaveAsync(_db);
+            var result = await GroupService.CreateGroupAsync(new CreateGroupRequest(
+                token, _collectionId!, CollectionName(), _description, _artistName, _newArtistUrl, files));
 
-            Snackbar.Add($"Created {subfolder} and uploaded {uploaded} image(s).", Severity.Success);
+            Snackbar.Add($"Created {result.Subfolder} and uploaded {result.Uploaded} image(s).", Severity.Success);
             MudDialog.Close(DialogResult.Ok(true));
         }
         catch (Exception ex)
