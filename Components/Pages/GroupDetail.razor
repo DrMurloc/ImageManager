@@ -186,14 +186,14 @@ else
         try
         {
             var live = await Drive.ListImagesAsync(_group.DriveFolderId);
-            _rows = live.Select(f =>
+            _rows = live.Select((f, index) =>
             {
                 var asset = _group.Images.FirstOrDefault(i => i.DriveFileId == f.Id);
                 return new ImageRow
                 {
                     Live = f,
                     Asset = asset,
-                    BlobName = asset?.BlobName ?? DefaultBlobName(f),
+                    BlobName = asset?.BlobName ?? DefaultBlobName(f, index),
                     AltText = asset?.AltText ?? _group.CharacterNames,
                     ChapterIds = asset is null ? new List<string>() : new List<string>(asset.Ao3ChapterIds)
                 };
@@ -215,7 +215,7 @@ else
     private static string PreviewUrl(DriveImageFile f)
         => $"/preview/{f.Id}?type={Uri.EscapeDataString(f.MimeType)}";
 
-    private string DefaultBlobName(DriveImageFile f)
+    private string DefaultBlobName(DriveImageFile f, int index)
     {
         var ext = Path.GetExtension(f.Name);
         if (string.IsNullOrEmpty(ext))
@@ -225,7 +225,16 @@ else
         }
 
         var artist = _artist is null ? "" : Regex.Replace(_artist.Name, "[^A-Za-z0-9]", "");
-        return artist.Length > 0 ? $"{artist}/Placeholder{ext}" : $"Placeholder{ext}";
+
+        // GroupName is "<description>_<artist>"; recover the description by dropping the trailing artist suffix.
+        var description = _group?.GroupName ?? "";
+        if (artist.Length > 0 && description.EndsWith("_" + artist, StringComparison.OrdinalIgnoreCase))
+            description = description[..^(artist.Length + 1)];
+        description = Regex.Replace(description, "[^A-Za-z0-9_]", "");
+        if (description.Length == 0) description = "Image";
+
+        var name = $"{description}{index + 1}{ext}";
+        return artist.Length > 0 ? $"{artist}/{name}" : name;
     }
 
     private async Task SyncSelected()

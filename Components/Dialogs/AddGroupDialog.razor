@@ -1,0 +1,212 @@
+@using System.Security.Claims
+@using System.Text.RegularExpressions
+@inject IMetadataStore Store
+@inject IDriveScanner Drive
+@inject IDriveUploader Uploader
+@inject IGoogleUserTokens Tokens
+@inject AuthenticationStateProvider AuthState
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<MudDialog>
+    <DialogContent>
+        @if (_db is null || _collections is null)
+        {
+            <MudProgressCircular Indeterminate="true" />
+        }
+        else
+        {
+            <MudSelect T="string" @bind-Value="_collectionId" Label="Collection" Dense="true" Required="true" Class="mb-3">
+                @foreach (var c in _collections)
+                {
+                    <MudSelectItem T="string" Value="@c.Id">@c.Name</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudTextField @bind-Value="_description" Label="Description" Immediate="true" Class="mb-3"
+                          HelperText="Letters, numbers, and underscores only."
+                          Error="@(_description.Length > 0 && !DescriptionValid)"
+                          ErrorText="No spaces or dashes — alphanumeric and underscores only." />
+
+            <MudAutocomplete T="string" Label="Artist" @bind-Value="_artistName" @bind-Value:after="StateHasChanged"
+                             SearchFunc="SearchArtists" CoerceValue="true" ResetValueOnEmptyText="false"
+                             Clearable="true" Immediate="true" Class="mb-3"
+                             HelperText="Pick an existing artist or type a new name." />
+
+            @if (IsNewArtist)
+            {
+                <MudTextField @bind-Value="_newArtistUrl" Label="New artist source URL" Class="mb-3"
+                              Placeholder="https://ko-fi.com/..." Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Link" />
+            }
+
+            <MudText Typo="Typo.body2" Class="mb-2 mud-text-secondary">
+                Folder: <b>@FolderPathPreview()</b>
+            </MudText>
+
+            @if (DuplicateExists())
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                    A group named <b>@SubfolderName()</b> already exists in <b>@CollectionName()</b>.
+                </MudAlert>
+            }
+
+            <MudFileUpload T="IReadOnlyList<IBrowserFile>" @bind-Files="_files" Accept="image/*"
+                           MaximumFileCount="1000" Class="mt-2">
+                <CustomContent Context="upload">
+                    <MudButton Variant="Variant.Filled" Color="Color.Default" StartIcon="@Icons.Material.Filled.Image"
+                               OnClick="@(() => upload.OpenFilePickerAsync())">
+                        Upload Images
+                    </MudButton>
+                </CustomContent>
+            </MudFileUpload>
+
+            @if (_files is { Count: > 0 })
+            {
+                <MudText Typo="Typo.caption" Class="mt-2 d-block">@_files.Count image(s) selected</MudText>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Login" OnClick="Reconnect">
+            Reconnect Google
+        </MudButton>
+        <MudSpacer />
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.CloudUpload"
+                   OnClick="Submit" Disabled="@(!CanSubmit || _busy)">
+            @(_busy ? "Uploading…" : "Create Group")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    // Last-scanned groups from the Groups page, used to warn about a same-name folder collision.
+    [Parameter] public IReadOnlyList<ScannedGroup> ExistingGroups { get; set; } = Array.Empty<ScannedGroup>();
+
+    private CommissionDatabase? _db;
+    private List<DriveFolderRef>? _collections;
+    private string? _collectionId;
+    private string _description = "";
+    private string _artistName = "";
+    private string _newArtistUrl = "";
+    private IReadOnlyList<IBrowserFile>? _files;
+    private bool _busy;
+    private string _email = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _db = await Store.LoadAsync();
+        _collections = (await Drive.ListCollectionsAsync()).ToList();
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _email = auth.User.FindFirst(ClaimTypes.Email)?.Value ?? "";
+    }
+
+    private Task<IEnumerable<string>> SearchArtists(string? value, CancellationToken ct)
+    {
+        var names = _db?.Artists.Select(a => a.Name) ?? Enumerable.Empty<string>();
+        if (!string.IsNullOrWhiteSpace(value))
+            names = names.Where(n => n.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(names);
+    }
+
+    private bool DescriptionValid => Regex.IsMatch(_description, "^[A-Za-z0-9_]+$");
+
+    private string AlphaArtist() => Regex.Replace(_artistName ?? "", "[^A-Za-z0-9]", "");
+
+    private string CollectionName() => _collections?.FirstOrDefault(c => c.Id == _collectionId)?.Name ?? "";
+
+    private string SubfolderName() => $"{_description}_{AlphaArtist()}";
+
+    private bool IsNewArtist =>
+        !string.IsNullOrWhiteSpace(_artistName)
+        && _db is not null
+        && !_db.Artists.Any(a => string.Equals(a.Name.Trim(), _artistName.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private bool DuplicateExists() =>
+        CollectionName().Length > 0 && AlphaArtist().Length > 0 && DescriptionValid
+        && ExistingGroups.Any(g =>
+            string.Equals(g.CharacterNames, CollectionName(), StringComparison.OrdinalIgnoreCase)
+            && string.Equals(g.GroupName, SubfolderName(), StringComparison.OrdinalIgnoreCase));
+
+    private bool CanSubmit =>
+        !string.IsNullOrEmpty(_collectionId)
+        && DescriptionValid
+        && !string.IsNullOrWhiteSpace(_artistName)
+        && AlphaArtist().Length > 0
+        && _files is { Count: > 0 }
+        && !DuplicateExists();
+
+    private string FolderPathPreview()
+    {
+        var coll = CollectionName() is { Length: > 0 } c ? c : "<collection>";
+        var desc = _description.Length > 0 ? _description : "<description>";
+        var artist = AlphaArtist() is { Length: > 0 } a ? a : "<artist>";
+        return $"{coll}/{desc}_{artist}/";
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    // Full reload so the server endpoint handles the OAuth round-trip; returns to the Groups page after.
+    private void Reconnect() => Nav.NavigateTo("/login?returnUrl=/groups", forceLoad: true);
+
+    private async Task Submit()
+    {
+        if (_db is null || !CanSubmit) return;
+
+        var token = await Tokens.GetValidAccessTokenAsync(_email);
+        if (token is null)
+        {
+            Snackbar.Add("Your Google connection expired — click Reconnect Google, then try again.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var artist = _db.Artists.FirstOrDefault(a =>
+                string.Equals(a.Name.Trim(), _artistName.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (artist is null)
+            {
+                artist = new Artist { Name = _artistName.Trim(), CreditUrl = _newArtistUrl.Trim() };
+                _db.Artists.Add(artist);
+            }
+
+            var subfolder = SubfolderName();
+            var folderId = await Uploader.CreateFolderAsync(token, _collectionId!, subfolder);
+
+            var uploaded = 0;
+            foreach (var file in _files!)
+            {
+                await using var stream = file.OpenReadStream(maxAllowedSize: 104_857_600);
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer);
+                buffer.Position = 0;
+                await Uploader.UploadAsync(token, folderId, file.Name, file.ContentType, buffer);
+                uploaded++;
+            }
+
+            _db.Groups.Add(new CommissionGroup
+            {
+                DriveFolderId = folderId,
+                CharacterNames = CollectionName(),
+                GroupName = subfolder,
+                ArtistId = artist.Id
+            });
+            await Store.SaveAsync(_db);
+
+            Snackbar.Add($"Created {subfolder} and uploaded {uploaded} image(s).", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

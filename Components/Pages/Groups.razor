@@ -3,13 +3,16 @@
 @inject IDriveScanner Drive
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject IDialogService DialogService
 
 <PageTitle>Commission Groups</PageTitle>
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
     <MudText Typo="Typo.h5">Commission Groups</MudText>
     <MudSpacer />
-    <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Primary" Variant="Variant.Filled"
+    <MudButton StartIcon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled"
+               OnClick="OpenAddGroup">Add Group</MudButton>
+    <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Default" Variant="Variant.Outlined"
                OnClick="Scan" Disabled="_scanning">@(_scanning ? "Scanning…" : "Scan Drive")</MudButton>
 </MudStack>
 
@@ -78,6 +81,22 @@ else
     {
         _db = await Store.LoadAsync();
         await Scan();
+    }
+
+    private async Task OpenAddGroup()
+    {
+        var parameters = new DialogParameters<AddGroupDialog>
+        {
+            { x => x.ExistingGroups, _rows?.Select(r => r.Scanned).ToList() ?? new List<ScannedGroup>() }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true };
+        var dialog = await DialogService.ShowAsync<AddGroupDialog>("Add Group", parameters, options);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            _db = await Store.LoadAsync();
+            await Scan();
+        }
     }
 
     private async Task Scan()
