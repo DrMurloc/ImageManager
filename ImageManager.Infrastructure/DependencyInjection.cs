@@ -30,7 +30,6 @@ public static class DependencyInjection
         services.AddSingleton<IDriveScanner, GoogleDriveScanner>();
         services.AddSingleton<IBlobSyncService, AzureBlobSyncService>();
         services.AddSingleton<IMetadataStore, JsonBlobMetadataStore>();
-        services.AddSingleton<IHtmlBuilder, HtmlBuilder>();
         services.AddSingleton<IDriveUploader, DriveUploader>();
         services.AddSingleton<IGoogleUserTokens, GoogleUserTokenStore>();
 

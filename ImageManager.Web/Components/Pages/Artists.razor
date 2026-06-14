@@ -1,5 +1,4 @@
 @page "/artists"
-@using System.Text.RegularExpressions
 @inject IMetadataStore Store
 @inject IDriveScanner Drive
 @inject ISnackbar Snackbar
@@ -81,29 +80,17 @@ else
 
             var added = 0;
             var updated = 0;
-            foreach (var rawLine in text.Split('\n'))
+            foreach (var parsed in SourcesParser.Parse(text))
             {
-                var line = rawLine.Trim();
-                if (Regex.Replace(line, @"\s+", "").Equals("ENDARTISTS", StringComparison.OrdinalIgnoreCase))
-                    break;
-
-                var match = Regex.Match(line, @"^(.+?)\s+-\s+(.+)$");
-                if (!match.Success) continue;
-
-                var name = match.Groups[1].Value.Trim();
-                if (name.Length == 0) continue;
-                var urlMatch = Regex.Match(match.Groups[2].Value, @"https?://\S+");
-                var creditUrl = urlMatch.Success ? urlMatch.Value : "";
-
-                var existing = _db.Artists.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+                var existing = _db.Artists.FirstOrDefault(a => string.Equals(a.Name, parsed.Name, StringComparison.OrdinalIgnoreCase));
                 if (existing is null)
                 {
-                    _db.Artists.Add(new Artist { Name = name, CreditUrl = creditUrl });
+                    _db.Artists.Add(new Artist { Name = parsed.Name, CreditUrl = parsed.CreditUrl });
                     added++;
                 }
-                else if (creditUrl.Length > 0 && existing.CreditUrl != creditUrl)
+                else if (parsed.CreditUrl.Length > 0 && existing.CreditUrl != parsed.CreditUrl)
                 {
-                    existing.CreditUrl = creditUrl;
+                    existing.CreditUrl = parsed.CreditUrl;
                     updated++;
                 }
             }
