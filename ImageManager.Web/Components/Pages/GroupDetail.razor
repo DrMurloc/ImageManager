@@ -1,5 +1,4 @@
 @page "/groups/{FolderId}"
-@using System.Text.RegularExpressions
 @inject IMetadataStore Store
 @inject IDriveScanner Drive
 @inject IBlobSyncService Blob
@@ -216,26 +215,7 @@ else
         => $"/preview/{f.Id}?type={Uri.EscapeDataString(f.MimeType)}";
 
     private string DefaultBlobName(DriveImageFile f, int index)
-    {
-        var ext = Path.GetExtension(f.Name);
-        if (string.IsNullOrEmpty(ext))
-        {
-            var slash = f.MimeType.IndexOf('/');
-            ext = slash >= 0 ? "." + f.MimeType[(slash + 1)..] : "";
-        }
-
-        var artist = _artist is null ? "" : Regex.Replace(_artist.Name, "[^A-Za-z0-9]", "");
-
-        // GroupName is "<description>_<artist>"; recover the description by dropping the trailing artist suffix.
-        var description = _group?.GroupName ?? "";
-        if (artist.Length > 0 && description.EndsWith("_" + artist, StringComparison.OrdinalIgnoreCase))
-            description = description[..^(artist.Length + 1)];
-        description = Regex.Replace(description, "[^A-Za-z0-9_]", "");
-        if (description.Length == 0) description = "Image";
-
-        var name = $"{description}{index + 1}{ext}";
-        return artist.Length > 0 ? $"{artist}/{name}" : name;
-    }
+        => BlobNaming.DefaultBlobName(_group?.GroupName ?? "", _artist?.Name, f.Name, f.MimeType, index);
 
     private async Task SyncSelected()
     {
