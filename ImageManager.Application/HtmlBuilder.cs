@@ -1,9 +1,8 @@
 using System.Net;
 using System.Text;
-using ImageManager.Application;
 using ImageManager.Domain;
 
-namespace ImageManager.Infrastructure;
+namespace ImageManager.Application;
 
 public sealed class HtmlBuilder : IHtmlBuilder
 {

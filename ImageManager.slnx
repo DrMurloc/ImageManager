@@ -2,5 +2,6 @@
   <Project Path="ImageManager.Domain/ImageManager.Domain.csproj" />
   <Project Path="ImageManager.Application/ImageManager.Application.csproj" />
   <Project Path="ImageManager.Infrastructure/ImageManager.Infrastructure.csproj" />
+  <Project Path="ImageManager.Tests/ImageManager.Tests.csproj" />
   <Project Path="ImageManager.Web/ImageManager.csproj" />
 </Solution>
