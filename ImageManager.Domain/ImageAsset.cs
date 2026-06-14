@@ -34,4 +34,15 @@ public sealed class ImageAsset
     // Returns false unless both the synced and live checksums are known.
     public bool IsDriftedFrom(string? liveMd5)
         => Synced && SyncedMd5 is not null && liveMd5 is not null && SyncedMd5 != liveMd5;
+
+    // Replace the linked AO3 chapters, pruning per-chapter state (placement confirmations and
+    // section assignments) for chapters that are no longer linked.
+    public void SetChapters(IEnumerable<string> chapterIds)
+    {
+        var ids = chapterIds.ToList();
+        Ao3ChapterIds = new List<string>(ids);
+        AddedToChapterIds.RemoveAll(id => !ids.Contains(id));
+        foreach (var staleId in ChapterSections.Keys.Where(k => !ids.Contains(k)).ToList())
+            ChapterSections.Remove(staleId);
+    }
 }

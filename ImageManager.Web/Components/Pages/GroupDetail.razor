@@ -282,10 +282,7 @@ else
         if (_db is null || row.Asset is null) return;
         var list = values?.ToList() ?? new List<string>();
         row.ChapterIds = list;
-        row.Asset.Ao3ChapterIds = new List<string>(list);
-        row.Asset.AddedToChapterIds.RemoveAll(id => !list.Contains(id));
-        foreach (var staleId in row.Asset.ChapterSections.Keys.Where(k => !list.Contains(k)).ToList())
-            row.Asset.ChapterSections.Remove(staleId);
+        row.Asset.SetChapters(list);
         await Store.SaveAsync(_db);
     }
 
