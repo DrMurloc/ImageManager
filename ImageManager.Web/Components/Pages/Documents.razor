@@ -1,0 +1,186 @@
+@page "/documents"
+@using System.Security.Claims
+@inject IMetadataStore Store
+@inject IGoogleUserTokens Tokens
+@inject AuthenticationStateProvider AuthState
+@inject IDocumentMigrationService Migrator
+@inject IOptions<GoogleDriveOptions> DriveOptions
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Documents</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h5">Documents</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Login" OnClick="Reconnect">Reconnect Google</MudButton>
+    <MudFileUpload T="IReadOnlyList<IBrowserFile>" FilesChanged="OnFilesSelected" Accept=".docx" MaximumFileCount="500">
+        <CustomContent Context="upload">
+            <MudButton Variant="Variant.Filled" Color="Color.Default" StartIcon="@Icons.Material.Filled.UploadFile"
+                       OnClick="@(() => upload.OpenFilePickerAsync())">
+                Choose .docx files
+            </MudButton>
+        </CustomContent>
+    </MudFileUpload>
+</MudStack>
+
+<MudText Typo="Typo.body2" Class="mb-4 mud-text-secondary">
+    Drop in chapters downloaded from Grammarly. Chapter numbers auto-fill from your AO3 chapters where the
+    name matches (AO3 number − 1); fill in any that aren't detected. Files migrate to
+    <b>Books/&lt;Book&gt;/Chapter &lt;n&gt; - &lt;Name&gt;.docx</b>.
+</MudText>
+
+@if (string.IsNullOrWhiteSpace(BooksRoot))
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-4">
+        GoogleDrive:BooksRootFolderId isn't configured — set it (User Secrets locally) before uploading.
+    </MudAlert>
+}
+
+@if (_rows.Count == 0)
+{
+    <MudText>No files selected yet.</MudText>
+}
+else
+{
+    <MudTable Items="_rows" Hover="true" Dense="true" Class="mb-4">
+        <HeaderContent>
+            <MudTh>Source file</MudTh>
+            <MudTh>Book</MudTh>
+            <MudTh>Chapter name</MudTh>
+            <MudTh Style="width:120px">Chapter #</MudTh>
+            <MudTh>Source</MudTh>
+            <MudTh>Target</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Source file"><MudText Typo="Typo.caption">@context.File.Name</MudText></MudTd>
+            <MudTd DataLabel="Book">
+                <MudTextField @bind-Value="context.Book" Immediate="true" Margin="Margin.Dense" Style="min-width:130px" />
+            </MudTd>
+            <MudTd DataLabel="Chapter name">
+                <MudTextField @bind-Value="context.ChapterName" Immediate="true" Margin="Margin.Dense" Style="min-width:160px" />
+            </MudTd>
+            <MudTd DataLabel="Chapter #">
+                <MudNumericField T="int?" @bind-Value="context.ChapterNumber" Min="0" Margin="Margin.Dense" Style="width:90px" />
+            </MudTd>
+            <MudTd DataLabel="Number">
+                @if (context.AutoNumbered)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.AutoAwesome">AO3</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">Manual</MudChip>
+                }
+            </MudTd>
+            <MudTd DataLabel="Target"><MudText Typo="Typo.caption">@TargetPath(context)</MudText></MudTd>
+        </RowTemplate>
+    </MudTable>
+
+    <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.DriveFileMove"
+               OnClick="Upload" Disabled="@(!CanUpload || _busy)">
+        @(_busy ? "Uploading…" : $"Migrate {_rows.Count} file(s) to Drive")
+    </MudButton>
+}
+
+@code {
+    private CommissionDatabase? _db;
+    private List<DocRow> _rows = new();
+    private bool _busy;
+    private string _email = "";
+
+    private string BooksRoot => DriveOptions.Value.BooksRootFolderId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _db = await Store.LoadAsync();
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _email = auth.User.FindFirst(ClaimTypes.Email)?.Value ?? "";
+    }
+
+    private void OnFilesSelected(IReadOnlyList<IBrowserFile> files)
+    {
+        var titles = _db?.Chapters.Select(c => c.Title).ToList() ?? new List<string>();
+        _rows = files.Select(f =>
+        {
+            var parsed = ChapterFiles.Parse(f.Name);
+            var number = Ao3Numbering.Resolve(titles, parsed.ChapterName);
+            return new DocRow
+            {
+                File = f,
+                Book = parsed.Book,
+                ChapterName = parsed.ChapterName,
+                ChapterNumber = number,
+                AutoNumbered = number is not null
+            };
+        }).ToList();
+    }
+
+    private string TargetPath(DocRow row)
+    {
+        var book = row.Book.Trim() is { Length: > 0 } b ? b : "<book>";
+        var name = row.ChapterName.Trim() is { Length: > 0 } n ? n : "<name>";
+        var number = row.ChapterNumber?.ToString() ?? "?";
+        return $"Books/{book}/Chapter {number} - {name}.docx";
+    }
+
+    private bool CanUpload =>
+        _rows.Count > 0
+        && !string.IsNullOrWhiteSpace(BooksRoot)
+        && _rows.All(r => !string.IsNullOrWhiteSpace(r.Book)
+                          && !string.IsNullOrWhiteSpace(r.ChapterName)
+                          && r.ChapterNumber is >= 0);
+
+    private void Reconnect() => Nav.NavigateTo("/login?returnUrl=/documents", forceLoad: true);
+
+    private async Task Upload()
+    {
+        if (!CanUpload) return;
+
+        var token = await Tokens.GetValidAccessTokenAsync(_email);
+        if (token is null)
+        {
+            Snackbar.Add("Your Google connection expired — click Reconnect Google, then try again.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var docs = new List<MigrateDocument>();
+            foreach (var row in _rows)
+            {
+                await using var stream = row.File.OpenReadStream(maxAllowedSize: 104_857_600);
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer);
+                docs.Add(new MigrateDocument(
+                    row.Book.Trim(), row.ChapterNumber!.Value, row.ChapterName.Trim(), row.File.ContentType, buffer.ToArray()));
+            }
+
+            var result = await Migrator.MigrateAsync(new MigrateRequest(token, BooksRoot, docs));
+
+            var message = result.Skipped.Count == 0
+                ? $"Migrated {result.Uploaded} chapter(s)."
+                : $"Migrated {result.Uploaded}; skipped {result.Skipped.Count} already in Drive.";
+            Snackbar.Add(message, Severity.Success);
+            _rows = new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Migration failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class DocRow
+    {
+        public required IBrowserFile File { get; init; }
+        public string Book { get; set; } = "";
+        public string ChapterName { get; set; } = "";
+        public int? ChapterNumber { get; set; }
+        public bool AutoNumbered { get; set; }
+    }
+}

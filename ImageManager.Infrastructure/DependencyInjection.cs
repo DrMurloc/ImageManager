@@ -16,6 +16,7 @@ public static class DependencyInjection
     {
         services.Configure<GoogleDriveOptions>(configuration.GetSection(GoogleDriveOptions.Section));
         services.Configure<AzureStorageOptions>(configuration.GetSection(AzureStorageOptions.Section));
+        services.Configure<AzureSearchOptions>(configuration.GetSection(AzureSearchOptions.Section));
 
         services.AddSingleton(sp =>
         {
@@ -32,6 +33,8 @@ public static class DependencyInjection
         services.AddSingleton<IMetadataStore, JsonBlobMetadataStore>();
         services.AddSingleton<IDriveUploader, DriveUploader>();
         services.AddSingleton<IGoogleUserTokens, GoogleUserTokenStore>();
+        services.AddSingleton<IDocxTextExtractor, OpenXmlDocxTextExtractor>();
+        services.AddSingleton<ISearchIndex, AzureSearchIndex>();
 
         return services;
     }

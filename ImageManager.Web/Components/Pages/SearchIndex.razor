@@ -1,0 +1,194 @@
+@page "/search-index"
+@using System.Security.Claims
+@inject IBookSearchIndexer Indexer
+@inject IGoogleUserTokens Tokens
+@inject AuthenticationStateProvider AuthState
+@inject IOptions<GoogleDriveOptions> DriveOptions
+@inject IOptions<AzureSearchOptions> SearchOptions
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Search Index</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+    <MudText Typo="Typo.h5">Search Index</MudText>
+    <MudSpacer />
+    <MudButton StartIcon="@Icons.Material.Filled.Build" OnClick="CreateIndex" Disabled="_busy">Create / update index</MudButton>
+    <MudButton StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadChapters" Disabled="_busy">Refresh</MudButton>
+    <MudButton StartIcon="@Icons.Material.Filled.CloudSync" Color="Color.Primary" Variant="Variant.Filled"
+               OnClick="SyncAll" Disabled="@(_busy || _chapters is not { Count: > 0 })">Sync all</MudButton>
+</MudStack>
+
+<MudText Typo="Typo.body2" Class="mb-4 mud-text-secondary">
+    Indexes the manuscript chapters under <b>/Books</b> into Azure AI Search (full-text), so the MCP
+    connector can search and pull chapters. Re-syncing a chapter replaces its existing passages.
+</MudText>
+
+@if (!SearchConfigured)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-2">AzureSearch:Endpoint / ApiKey aren't configured — set them (User Secrets) before indexing.</MudAlert>
+}
+@if (string.IsNullOrWhiteSpace(BooksRoot))
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-2">GoogleDrive:BooksRootFolderId isn't configured — set it to list chapters.</MudAlert>
+}
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-2">@_error</MudAlert>
+}
+
+@if (_needsReconnect)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-2">
+        Your Google connection expired.
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Login" OnClick="Reconnect">Reconnect Google</MudButton>
+    </MudAlert>
+}
+else if (_loading)
+{
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+        <MudText>Listing chapters…</MudText>
+    </MudStack>
+}
+else if (_chapters is null)
+{
+    <MudText>Configure the Books folder, then Refresh.</MudText>
+}
+else if (_chapters.Count == 0)
+{
+    <MudText>No chapters found under /Books. Migrate some on the Documents page first.</MudText>
+}
+else
+{
+    <MudTable Items="_chapters" Hover="true" Dense="true" GroupBy="_groupBy">
+        <HeaderContent>
+            <MudTh>Chapter #</MudTh>
+            <MudTh>Name</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <GroupHeaderTemplate>
+            <MudTh Class="mud-table-cell-custom-group" colspan="3">@context.Key</MudTh>
+        </GroupHeaderTemplate>
+        <RowTemplate>
+            <MudTd DataLabel="Chapter #">@context.Number</MudTd>
+            <MudTd DataLabel="Name">@context.Name</MudTd>
+            <MudTd Style="text-align:right">
+                <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.CloudUpload"
+                           OnClick="@(() => SyncOne(context))" Disabled="_busy">Sync to search</MudButton>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    private List<BookChapterRef>? _chapters;
+    private bool _busy;
+    private bool _loading;
+    private bool _needsReconnect;
+    private string? _error;
+    private string _email = "";
+
+    private readonly TableGroupDefinition<BookChapterRef> _groupBy = new()
+    {
+        Selector = c => c.Book
+    };
+
+    private string BooksRoot => DriveOptions.Value.BooksRootFolderId;
+    private bool SearchConfigured =>
+        !string.IsNullOrWhiteSpace(SearchOptions.Value.Endpoint) && !string.IsNullOrWhiteSpace(SearchOptions.Value.ApiKey);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _email = auth.User.FindFirst(ClaimTypes.Email)?.Value ?? "";
+        await LoadChapters();
+    }
+
+    private async Task LoadChapters()
+    {
+        _error = null;
+        _needsReconnect = false;
+        if (string.IsNullOrWhiteSpace(BooksRoot)) return;
+
+        var token = await Tokens.GetValidAccessTokenAsync(_email);
+        if (token is null) { _needsReconnect = true; return; }
+
+        _loading = true;
+        try
+        {
+            _chapters = (await Indexer.ListChaptersAsync(token, BooksRoot))
+                .OrderBy(c => c.Book).ThenBy(c => c.Number).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task CreateIndex()
+    {
+        _busy = true;
+        try
+        {
+            await Indexer.EnsureIndexAsync();
+            Snackbar.Add("Search index created/updated.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Index setup failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SyncAll()
+    {
+        var token = await Tokens.GetValidAccessTokenAsync(_email);
+        if (token is null) { _needsReconnect = true; return; }
+
+        _busy = true;
+        try
+        {
+            var count = await Indexer.IndexAllAsync(token, BooksRoot);
+            Snackbar.Add($"Indexed {count} chapter(s).", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Indexing failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SyncOne(BookChapterRef chapter)
+    {
+        var token = await Tokens.GetValidAccessTokenAsync(_email);
+        if (token is null) { _needsReconnect = true; return; }
+
+        _busy = true;
+        try
+        {
+            await Indexer.IndexChapterAsync(token, chapter);
+            Snackbar.Add($"Indexed {chapter.Book} — Chapter {chapter.Number}.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Indexing failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Reconnect() => Nav.NavigateTo("/login?returnUrl=/search-index", forceLoad: true);
+}

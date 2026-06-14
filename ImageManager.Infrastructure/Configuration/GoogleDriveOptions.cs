@@ -12,4 +12,7 @@ public sealed class GoogleDriveOptions
 
     // Drive folder ID of the /Commissions root, taken from the folder's URL.
     public string CommissionsRootFolderId { get; set; } = "";
+
+    // Drive folder ID of the /Books root, under which per-book chapter folders are created.
+    public string BooksRootFolderId { get; set; } = "";
 }
