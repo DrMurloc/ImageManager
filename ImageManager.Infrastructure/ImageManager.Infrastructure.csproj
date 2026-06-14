@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- Brings in Microsoft.Extensions.* (Options, Configuration, Http, DI) for the service
+       implementations and the AddInfrastructure composition extension, without pinning packages. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.28.0" />
+    <PackageReference Include="Google.Apis.Drive.v3" Version="1.74.0.4135" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ImageManager.Application\ImageManager.Application.csproj" />
+    <ProjectReference Include="..\ImageManager.Domain\ImageManager.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

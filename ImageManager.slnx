@@ -1,3 +1,6 @@
 <Solution>
-  <Project Path="ImageManager.csproj" />
+  <Project Path="ImageManager.Domain/ImageManager.Domain.csproj" />
+  <Project Path="ImageManager.Application/ImageManager.Application.csproj" />
+  <Project Path="ImageManager.Infrastructure/ImageManager.Infrastructure.csproj" />
+  <Project Path="ImageManager.Web/ImageManager.csproj" />
 </Solution>

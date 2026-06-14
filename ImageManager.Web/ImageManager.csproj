@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -6,13 +6,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UserSecretsId>e80804a2-6abe-4ea0-92fb-2a57a0f376c9</UserSecretsId>
+    <RootNamespace>ImageManager</RootNamespace>
+    <AssemblyName>ImageManager</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.28.0" />
-    <PackageReference Include="Google.Apis.Drive.v3" Version="1.74.0.4135" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.8" />
     <PackageReference Include="MudBlazor" Version="9.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ImageManager.Application\ImageManager.Application.csproj" />
+    <ProjectReference Include="..\ImageManager.Domain\ImageManager.Domain.csproj" />
+    <ProjectReference Include="..\ImageManager.Infrastructure\ImageManager.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

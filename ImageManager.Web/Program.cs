@@ -1,15 +1,12 @@
 using System.Security.Claims;
-using Azure.Storage.Blobs;
 using ImageManager.Application;
 using ImageManager.Components;
-using ImageManager.Configuration;
 using ImageManager.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.Extensions.Options;
 using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -85,27 +82,7 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddCascadingAuthenticationState();
 
-builder.Services.Configure<GoogleDriveOptions>(
-    builder.Configuration.GetSection(GoogleDriveOptions.Section));
-builder.Services.Configure<AzureStorageOptions>(
-    builder.Configuration.GetSection(AzureStorageOptions.Section));
-
-builder.Services.AddSingleton(sp =>
-{
-    var connectionString = sp.GetRequiredService<IOptions<AzureStorageOptions>>().Value.ConnectionString;
-    if (string.IsNullOrWhiteSpace(connectionString))
-        throw new InvalidOperationException(
-            "AzureStorage:ConnectionString is not set. Add it via User Secrets.");
-    return new BlobServiceClient(connectionString);
-});
-
-builder.Services.AddHttpClient();
-builder.Services.AddSingleton<IDriveScanner, GoogleDriveScanner>();
-builder.Services.AddSingleton<IBlobSyncService, AzureBlobSyncService>();
-builder.Services.AddSingleton<IMetadataStore, JsonBlobMetadataStore>();
-builder.Services.AddSingleton<IHtmlBuilder, HtmlBuilder>();
-builder.Services.AddSingleton<IDriveUploader, DriveUploader>();
-builder.Services.AddSingleton<IGoogleUserTokens, GoogleUserTokenStore>();
+builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
