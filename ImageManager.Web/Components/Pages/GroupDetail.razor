@@ -209,7 +209,7 @@ else
     }
 
     private static bool IsDrifted(ImageRow row)
-        => row.Asset is { Synced: true } a && a.SyncedMd5 is not null && row.Live.Md5 is not null && a.SyncedMd5 != row.Live.Md5;
+        => row.Asset?.IsDriftedFrom(row.Live.Md5) ?? false;
 
     private static string PreviewUrl(DriveImageFile f)
         => $"/preview/{f.Id}?type={Uri.EscapeDataString(f.MimeType)}";

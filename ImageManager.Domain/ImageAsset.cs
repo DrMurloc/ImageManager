@@ -29,4 +29,9 @@ public sealed class ImageAsset
 
     // Which gallery section the image sits in, per chapter (keyed by chapter Id). Defaults to Midsection.
     public Dictionary<string, GallerySection> ChapterSections { get; set; } = new();
+
+    // True when this image was synced but its Drive source has since changed (md5 mismatch).
+    // Returns false unless both the synced and live checksums are known.
+    public bool IsDriftedFrom(string? liveMd5)
+        => Synced && SyncedMd5 is not null && liveMd5 is not null && SyncedMd5 != liveMd5;
 }
