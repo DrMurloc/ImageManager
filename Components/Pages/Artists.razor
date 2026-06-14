@@ -1,0 +1,172 @@
+@page "/artists"
+@using System.Text.RegularExpressions
+@inject IMetadataStore Store
+@inject IDriveScanner Drive
+@inject ISnackbar Snackbar
+
+<PageTitle>Artists</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h5">Artists</MudText>
+    <MudSpacer />
+    <MudButton StartIcon="@Icons.Material.Filled.Download" OnClick="ImportFromSources" Disabled="_importing">
+        @(_importing ? "Importing…" : "Import from Sources")
+    </MudButton>
+    <MudButton StartIcon="@Icons.Material.Filled.Add" Color="Color.Primary" Variant="Variant.Filled" OnClick="OpenAdd">Add artist</MudButton>
+</MudStack>
+
+@if (_db is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_db.Artists.Count == 0)
+{
+    <MudText>No artists yet. Add one to credit your commissions.</MudText>
+}
+else
+{
+    <MudTable Items="_db.Artists" Hover="true" Dense="true">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>Credit URL</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Name">@context.Name</MudTd>
+            <MudTd DataLabel="Credit URL">
+                <MudLink Href="@context.CreditUrl" Target="_blank">@context.CreditUrl</MudLink>
+            </MudTd>
+            <MudTd Style="text-align:right">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Delete(context))" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+<MudDialog @bind-Visible="_dialogVisible" Options="_dialogOptions">
+    <TitleContent>@(_editing is null ? "Add artist" : "Edit artist")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_form.Name" Label="Name" Required="true" />
+        <MudTextField @bind-Value="_form.CreditUrl" Label="Credit URL" Class="mt-3" Placeholder="https://ko-fi.com/..." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dialogVisible = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private CommissionDatabase? _db;
+    private bool _dialogVisible;
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+    private Artist? _editing;
+    private Artist _form = new();
+    private bool _importing;
+
+    protected override async Task OnInitializedAsync() => _db = await Store.LoadAsync();
+
+    private async Task ImportFromSources()
+    {
+        if (_db is null) return;
+        _importing = true;
+        try
+        {
+            var text = await Drive.ReadSourcesDocAsync();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                Snackbar.Add("No Sources doc found in the Commissions root.", Severity.Warning);
+                return;
+            }
+
+            var added = 0;
+            var updated = 0;
+            foreach (var rawLine in text.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (Regex.Replace(line, @"\s+", "").Equals("ENDARTISTS", StringComparison.OrdinalIgnoreCase))
+                    break;
+
+                var match = Regex.Match(line, @"^(.+?)\s+-\s+(.+)$");
+                if (!match.Success) continue;
+
+                var name = match.Groups[1].Value.Trim();
+                if (name.Length == 0) continue;
+                var urlMatch = Regex.Match(match.Groups[2].Value, @"https?://\S+");
+                var creditUrl = urlMatch.Success ? urlMatch.Value : "";
+
+                var existing = _db.Artists.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (existing is null)
+                {
+                    _db.Artists.Add(new Artist { Name = name, CreditUrl = creditUrl });
+                    added++;
+                }
+                else if (creditUrl.Length > 0 && existing.CreditUrl != creditUrl)
+                {
+                    existing.CreditUrl = creditUrl;
+                    updated++;
+                }
+            }
+
+            if (added > 0 || updated > 0) await Store.SaveAsync(_db);
+            Snackbar.Add($"Imported {added} new, updated {updated}.",
+                added == 0 && updated == 0 ? Severity.Info : Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Import failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
+
+    private void OpenAdd()
+    {
+        _editing = null;
+        _form = new Artist();
+        _dialogVisible = true;
+    }
+
+    private void OpenEdit(Artist artist)
+    {
+        _editing = artist;
+        _form = new Artist { Id = artist.Id, Name = artist.Name, CreditUrl = artist.CreditUrl };
+        _dialogVisible = true;
+    }
+
+    private async Task Save()
+    {
+        if (_db is null) return;
+        if (string.IsNullOrWhiteSpace(_form.Name))
+        {
+            Snackbar.Add("Name is required.", Severity.Warning);
+            return;
+        }
+
+        if (_editing is null)
+        {
+            _db.Artists.Add(_form);
+        }
+        else
+        {
+            _editing.Name = _form.Name;
+            _editing.CreditUrl = _form.CreditUrl;
+        }
+
+        await Store.SaveAsync(_db);
+        _dialogVisible = false;
+        Snackbar.Add("Saved.", Severity.Success);
+    }
+
+    private async Task Delete(Artist artist)
+    {
+        if (_db is null) return;
+        _db.Artists.Remove(artist);
+        foreach (var group in _db.Groups.Where(g => g.ArtistId == artist.Id))
+            group.ArtistId = null;
+        await Store.SaveAsync(_db);
+        Snackbar.Add("Deleted.", Severity.Success);
+    }
+}

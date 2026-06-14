@@ -1,0 +1,248 @@
+@page "/plan"
+@inject IMetadataStore Store
+@inject IBlobSyncService Blob
+@inject IHtmlBuilder Html
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>Chapter Planning</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">Chapter Planning</MudText>
+
+@if (_db is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_db.Chapters.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">Add AO3 chapters first, then plan which images go on each one.</MudAlert>
+}
+else
+{
+    <MudExpansionPanels MultiExpansion="true">
+        @foreach (var chapter in _db.Chapters)
+        {
+            var images = ImagesFor(chapter);
+            <MudExpansionPanel>
+                <TitleContent>
+                    @{
+                        var addedCount = images.Count(i => i.AddedToChapterIds.Contains(chapter.Id));
+                    }
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudText>@chapter.Title</MudText>
+                        <MudChip T="string" Size="Size.Small"
+                                 Color="@(images.Count > 0 && addedCount == images.Count ? Color.Success : images.Count == 0 ? Color.Default : Color.Primary)">
+                            @addedCount/@images.Count added
+                        </MudChip>
+                    </MudStack>
+                </TitleContent>
+                <ChildContent>
+                    <MudStack Row="true" Spacing="2">
+                        <MudButton StartIcon="@Icons.Material.Filled.Add" Size="Size.Small" Variant="Variant.Outlined"
+                                   Color="Color.Primary" OnClick="@(() => OpenAdd(chapter))">Add image</MudButton>
+                        <MudButton StartIcon="@Icons.Material.Filled.Collections" Size="Size.Small" Variant="Variant.Outlined"
+                                   OnClick="@(() => CopyGallery(chapter, GallerySection.Header))"
+                                   Disabled="@(!images.Any(i => SectionOf(i, chapter) == GallerySection.Header))">
+                            Copy header gallery
+                        </MudButton>
+                        <MudButton StartIcon="@Icons.Material.Filled.Collections" Size="Size.Small" Variant="Variant.Outlined"
+                                   OnClick="@(() => CopyGallery(chapter, GallerySection.Footer))"
+                                   Disabled="@(!images.Any(i => SectionOf(i, chapter) == GallerySection.Footer))">
+                            Copy footer gallery
+                        </MudButton>
+                    </MudStack>
+
+                    @if (images.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-2 mud-text-secondary">No images associated yet.</MudText>
+                    }
+                    else
+                    {
+                        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;">
+                            @foreach (var img in images.OrderBy(i => SectionOf(i, chapter)))
+                            {
+                                var added = img.AddedToChapterIds.Contains(chapter.Id);
+                                <MudPaper Outlined="true" Class="pa-1" Style="@($"width:190px; {(added ? "border:2px solid var(--mud-palette-success);" : "")}")">
+                                    <div style="position:relative;">
+                                        <img src="@Blob.GetPublicUrl(img.BlobName!)" alt="@img.AltText" title="@img.BlobName" loading="lazy"
+                                             style="height:120px; width:100%; object-fit:contain; border-radius:4px; display:block; background:rgba(0,0,0,0.2);" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                                       Style="position:absolute; top:2px; left:2px; background:rgba(0,0,0,0.55);"
+                                                       OnClick="@(() => RemoveImage(chapter, img))" />
+                                    </div>
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-1">
+                                        <MudCheckBox T="bool" Value="added" Dense="true" Size="Size.Small" Label="Added"
+                                                     ValueChanged="@(v => ToggleAdded(chapter, img, v))" />
+                                        <MudTooltip Text="Copy this image's HTML (sized)">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Code" Size="Size.Small"
+                                                           OnClick="@(() => CopyOne(chapter, img))" />
+                                        </MudTooltip>
+                                    </MudStack>
+                                    <MudSelect T="GallerySection" Value="@SectionOf(img, chapter)" ValueChanged="@(s => SetSection(chapter, img, s))"
+                                               Dense="true" Margin="Margin.Dense" Label="Section" Class="mt-1">
+                                        <MudSelectItem T="GallerySection" Value="GallerySection.Header">Header</MudSelectItem>
+                                        <MudSelectItem T="GallerySection" Value="GallerySection.Midsection">Midsection</MudSelectItem>
+                                        <MudSelectItem T="GallerySection" Value="GallerySection.Footer">Footer</MudSelectItem>
+                                    </MudSelect>
+                                    <MudSelect T="ImageSize" Value="img.Size" ValueChanged="@(s => SetSize(img, s))"
+                                               Dense="true" Margin="Margin.Dense" Label="Gallery size" Class="mt-1">
+                                        <MudSelectItem T="ImageSize" Value="ImageSize.Small">Small</MudSelectItem>
+                                        <MudSelectItem T="ImageSize" Value="ImageSize.Medium">Medium</MudSelectItem>
+                                        <MudSelectItem T="ImageSize" Value="ImageSize.Large">Large</MudSelectItem>
+                                        <MudSelectItem T="ImageSize" Value="ImageSize.ExtraLarge">Extra large</MudSelectItem>
+                                    </MudSelect>
+                                </MudPaper>
+                            }
+                        </div>
+                    }
+                </ChildContent>
+            </MudExpansionPanel>
+        }
+    </MudExpansionPanels>
+}
+
+<MudDialog @bind-Visible="_addVisible" Options="_addOptions">
+    <TitleContent>Add image to @_addChapter?.Title</TitleContent>
+    <DialogContent>
+        @if (_unplaced.Count == 0)
+        {
+            <MudText>No unplaced images — every synced image is already on a chapter.</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mb-2 mud-text-secondary">Click an image to add it. Unplaced images only.</MudText>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                @foreach (var img in _unplaced)
+                {
+                    <MudPaper Outlined="true" Class="pa-1" Style="cursor:pointer;" @onclick="@(() => AddImage(img))">
+                        <img src="@Blob.GetPublicUrl(img.BlobName!)" alt="@img.AltText" title="@img.BlobName" loading="lazy"
+                             style="height:110px; width:auto; max-width:160px; object-fit:contain; display:block;" />
+                        <MudText Typo="Typo.caption" Align="Align.Center" Style="max-width:160px;" Class="d-block text-truncate">@img.BlobName</MudText>
+                    </MudPaper>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _addVisible = false)">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private CommissionDatabase? _db;
+
+    private bool _addVisible;
+    private readonly DialogOptions _addOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private Ao3Chapter? _addChapter;
+    private List<ImageAsset> _unplaced = new();
+
+    protected override async Task OnInitializedAsync() => _db = await Store.LoadAsync();
+
+    private List<ImageAsset> AllImages()
+        => _db is null ? new() : _db.Groups.SelectMany(g => g.Images).Where(i => i.BlobName is not null).ToList();
+
+    private List<ImageAsset> ImagesFor(Ao3Chapter chapter)
+        => AllImages().Where(i => i.Ao3ChapterIds.Contains(chapter.Id)).ToList();
+
+    private void OpenAdd(Ao3Chapter chapter)
+    {
+        _addChapter = chapter;
+        RefreshUnplaced();
+        _addVisible = true;
+    }
+
+    private void RefreshUnplaced()
+        => _unplaced = AllImages().Where(i => i.Ao3ChapterIds.Count == 0).ToList();
+
+    private async Task AddImage(ImageAsset img)
+    {
+        if (_db is null || _addChapter is null) return;
+        if (!img.Ao3ChapterIds.Contains(_addChapter.Id))
+            img.Ao3ChapterIds.Add(_addChapter.Id);
+        await Store.SaveAsync(_db);
+        RefreshUnplaced();
+    }
+
+    private async Task RemoveImage(Ao3Chapter chapter, ImageAsset img)
+    {
+        if (_db is null) return;
+        img.Ao3ChapterIds.Remove(chapter.Id);
+        img.AddedToChapterIds.Remove(chapter.Id);
+        img.ChapterSections.Remove(chapter.Id);
+        await Store.SaveAsync(_db);
+        Snackbar.Add("Removed from chapter.", Severity.Success);
+    }
+
+    private async Task ToggleAdded(Ao3Chapter chapter, ImageAsset img, bool added)
+    {
+        if (_db is null) return;
+        if (added && !img.AddedToChapterIds.Contains(chapter.Id))
+            img.AddedToChapterIds.Add(chapter.Id);
+        else if (!added)
+            img.AddedToChapterIds.Remove(chapter.Id);
+        await Store.SaveAsync(_db);
+    }
+
+    private async Task SetSize(ImageAsset img, ImageSize size)
+    {
+        if (_db is null) return;
+        img.Size = size;
+        await Store.SaveAsync(_db);
+    }
+
+    private GallerySection SectionOf(ImageAsset img, Ao3Chapter chapter)
+        => img.ChapterSections.GetValueOrDefault(chapter.Id, GallerySection.Midsection);
+
+    private async Task SetSection(Ao3Chapter chapter, ImageAsset img, GallerySection section)
+    {
+        if (_db is null) return;
+        img.ChapterSections[chapter.Id] = section;
+        await Store.SaveAsync(_db);
+    }
+
+    // Single image, but sized with the chapter's box/tier — for placing midsection images one at a time.
+    private async Task CopyOne(Ao3Chapter chapter, ImageAsset img)
+    {
+        if (_db is null || img.BlobName is null) return;
+        var items = new[] { new GalleryItem(img, ArtistFor(img), Blob.GetPublicUrl(img.BlobName)) };
+        var html = Html.BuildGallery(items, chapter.GalleryMaxWidth, chapter.GalleryMaxHeight);
+        await CopyAsync(html, "Copied image HTML.");
+    }
+
+    private Artist? ArtistFor(ImageAsset img)
+    {
+        if (_db is null) return null;
+        var group = _db.Groups.FirstOrDefault(g => g.Images.Contains(img));
+        return group?.ArtistId is { } id ? _db.Artists.FirstOrDefault(a => a.Id == id) : null;
+    }
+
+    private async Task CopyGallery(Ao3Chapter chapter, GallerySection section)
+    {
+        if (_db is null) return;
+        var items = ImagesFor(chapter)
+            .Where(i => i.BlobName is not null && SectionOf(i, chapter) == section)
+            .Select(i => new GalleryItem(i, ArtistFor(i), Blob.GetPublicUrl(i.BlobName!)))
+            .ToList();
+        if (items.Count == 0)
+        {
+            Snackbar.Add($"No {section} images to copy.", Severity.Info);
+            return;
+        }
+
+        var html = Html.BuildGallery(items, chapter.GalleryMaxWidth, chapter.GalleryMaxHeight);
+        await CopyAsync(html, $"Copied {section} gallery ({items.Count} image(s)).");
+    }
+
+    private async Task CopyAsync(string html, string successMessage)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", html);
+            Snackbar.Add(successMessage, Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add("Couldn't access the clipboard; copy manually.", Severity.Warning);
+        }
+    }
+}

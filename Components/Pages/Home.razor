@@ -1,0 +1,54 @@
+@page "/"
+@inject IOptions<AzureStorageOptions> AzureOptions
+@inject IOptions<GoogleDriveOptions> GoogleOptions
+
+<PageTitle>Commission Image Manager</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-2">Commission Image Manager</MudText>
+<MudText Typo="Typo.body1" Class="mb-6">Sync commissioned art from Google Drive to Azure and generate AO3 embeds.</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4" Outlined="true">
+            <MudText Typo="Typo.h6" Class="mb-2">Configuration</MudText>
+            <MudList T="string" Dense="true">
+                <MudListItem T="string" Icon="@Mark(_googleConfigured)" IconColor="@MarkColor(_googleConfigured)">Google Drive credentials</MudListItem>
+                <MudListItem T="string" Icon="@Mark(_rootConfigured)" IconColor="@MarkColor(_rootConfigured)">Commissions root folder ID</MudListItem>
+                <MudListItem T="string" Icon="@Mark(_azureConfigured)" IconColor="@MarkColor(_azureConfigured)">Azure storage connection</MudListItem>
+                <MudListItem T="string" Icon="@Mark(_publicUrlConfigured)" IconColor="@MarkColor(_publicUrlConfigured)">Public URL base</MudListItem>
+            </MudList>
+            @if (!_allConfigured)
+            {
+                <MudAlert Severity="Severity.Info" Class="mt-3" Dense="true">Set the missing values in User Secrets, then restart the app.</MudAlert>
+            }
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-4" Outlined="true">
+            <MudText Typo="Typo.h6" Class="mb-2">Workflow</MudText>
+            <MudList T="string" Dense="true">
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Brush" Href="/artists">1. Add artists &amp; credit URLs</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Folder" Href="/groups">2. Scan groups &amp; sync images</MudListItem>
+                <MudListItem T="string" Icon="@Icons.Material.Filled.MenuBook" Href="/chapters">3. Manage AO3 chapters</MudListItem>
+            </MudList>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private bool _googleConfigured, _rootConfigured, _azureConfigured, _publicUrlConfigured, _allConfigured;
+
+    protected override void OnInitialized()
+    {
+        var g = GoogleOptions.Value;
+        var a = AzureOptions.Value;
+        _googleConfigured = !string.IsNullOrWhiteSpace(g.ServiceAccountKeyPath) || !string.IsNullOrWhiteSpace(g.ServiceAccountJson);
+        _rootConfigured = !string.IsNullOrWhiteSpace(g.CommissionsRootFolderId);
+        _azureConfigured = !string.IsNullOrWhiteSpace(a.ConnectionString);
+        _publicUrlConfigured = !string.IsNullOrWhiteSpace(a.PublicBaseUrl);
+        _allConfigured = _googleConfigured && _rootConfigured && _azureConfigured && _publicUrlConfigured;
+    }
+
+    private static string Mark(bool ok) => ok ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked;
+    private static Color MarkColor(bool ok) => ok ? Color.Success : Color.Default;
+}

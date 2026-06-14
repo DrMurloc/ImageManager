@@ -1,0 +1,32 @@
+namespace ImageManager.Domain;
+
+public enum ImageSize { Small, Medium, Large, ExtraLarge }
+
+public enum GallerySection { Header, Midsection, Footer }
+
+public sealed class ImageAsset
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string DriveFileId { get; set; } = "";
+    public string SourceFileName { get; set; } = "";
+    public string? BlobName { get; set; }
+    public int? Width { get; set; }
+    public int? Height { get; set; }
+    public string? AltText { get; set; }
+    public bool Synced { get; set; }
+    public DateTimeOffset? SyncedAt { get; set; }
+
+    // Drive md5 captured at last sync; compared with the live md5 to flag source drift.
+    public string? SyncedMd5 { get; set; }
+
+    public List<string> Ao3ChapterIds { get; set; } = new();
+
+    // Chapters the image has actually been embedded on in AO3 (confirmed by the user after the fact).
+    public List<string> AddedToChapterIds { get; set; } = new();
+
+    // Scales how much gallery space the image gets, relative to the chapter's configured box.
+    public ImageSize Size { get; set; } = ImageSize.Medium;
+
+    // Which gallery section the image sits in, per chapter (keyed by chapter Id). Defaults to Midsection.
+    public Dictionary<string, GallerySection> ChapterSections { get; set; } = new();
+}

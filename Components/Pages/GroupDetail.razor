@@ -1,0 +1,347 @@
+@page "/groups/{FolderId}"
+@using System.Text.RegularExpressions
+@inject IMetadataStore Store
+@inject IDriveScanner Drive
+@inject IBlobSyncService Blob
+@inject IHtmlBuilder Html
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>Group</PageTitle>
+
+@if (_db is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_group is null)
+{
+    <MudAlert Severity="Severity.Warning">Group not found. Scan groups from the Commission Groups page first.</MudAlert>
+}
+else
+{
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Href="/groups" />
+        <div>
+            <MudText Typo="Typo.h5">@_group.CharacterNames — @_group.GroupName</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Artist: @(_artist?.Name ?? "Unassigned")</MudText>
+        </div>
+        <MudSpacer />
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" OnClick="ScanImages" Disabled="_scanning">
+            @(_scanning ? "Scanning…" : "Scan images")
+        </MudButton>
+        <MudButton StartIcon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" Variant="Variant.Filled"
+                   OnClick="SyncSelected" Disabled="@(_busy || SelectedCount == 0)">
+            Sync selected (@SelectedCount)
+        </MudButton>
+    </MudStack>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+    }
+
+    @if (_rows is null)
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+            <MudText>Scanning images…</MudText>
+        </MudStack>
+    }
+    else if (_rows.Count == 0)
+    {
+        <MudText>No images found in this group folder.</MudText>
+    }
+    else
+    {
+        <MudTable Items="_rows" Hover="true" Dense="true">
+            <HeaderContent>
+                <MudTh Style="width:1px"></MudTh>
+                <MudTh>Preview</MudTh>
+                <MudTh>Source</MudTh>
+                <MudTh>Size</MudTh>
+                <MudTh>Blob name</MudTh>
+                <MudTh>Alt text</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>AO3 chapters</MudTh>
+                <MudTh Style="text-align:right">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><MudCheckBox T="bool" @bind-Value="context.Selected" /></MudTd>
+                <MudTd DataLabel="Preview">
+                    <img src="@PreviewUrl(context.Live)" alt="@context.Live.Name" loading="lazy"
+                         style="height:48px; width:auto; max-width:80px; object-fit:contain; border-radius:4px;" />
+                </MudTd>
+                <MudTd DataLabel="Source"><MudText Typo="Typo.body2">@context.Live.Path</MudText></MudTd>
+                <MudTd DataLabel="Size">
+                    @if (context.Live.Width is int w && context.Live.Height is int h)
+                    {
+                        @($"{w}×{h}")
+                    }
+                </MudTd>
+                <MudTd DataLabel="Blob name">
+                    <MudTextField @bind-Value="context.BlobName" Margin="Margin.Dense" Style="min-width:150px" />
+                </MudTd>
+                <MudTd DataLabel="Alt text">
+                    <MudTextField @bind-Value="context.AltText" Margin="Margin.Dense" Style="min-width:150px" />
+                </MudTd>
+                <MudTd DataLabel="Status">
+                    @if (context.Asset is { Synced: true })
+                    {
+                        @if (IsDrifted(context))
+                        {
+                            <MudTooltip Text="Source changed in Drive since last sync">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.SyncProblem">Drifted</MudChip>
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.CloudDone">Synced</MudChip>
+                        }
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default">Not synced</MudChip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="AO3 chapters">
+                    @if (context.Asset is not null)
+                    {
+                        <MudSelect T="string" MultiSelection="true" SelectedValues="@context.ChapterIds"
+                                   SelectedValuesChanged="@(vals => UpdateChapters(context, vals))"
+                                   Dense="true" Style="min-width:150px"
+                                   MultiSelectionTextFunc="@(ids => ChapterTitles(ids))">
+                            @foreach (var chapter in _db.Chapters)
+                            {
+                                <MudSelectItem T="string" Value="@chapter.Id">@chapter.Title</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">Sync first</MudText>
+                    }
+                </MudTd>
+                <MudTd Style="text-align:right">
+                    <MudTooltip Text="Sync to Azure">
+                        <MudIconButton Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small"
+                                       OnClick="@(() => SyncOne(context))" Disabled="_busy" />
+                    </MudTooltip>
+                    <MudTooltip Text="Copy AO3 HTML">
+                        <MudIconButton Icon="@Icons.Material.Filled.Code" Size="Size.Small"
+                                       OnClick="@(() => ShowHtml(context))"
+                                       Disabled="@(context.Asset is not { Synced: true })" />
+                    </MudTooltip>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+}
+
+<MudDialog @bind-Visible="_htmlDialogVisible" Options="_htmlDialogOptions">
+    <TitleContent>AO3 HTML</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_htmlSnippet" Lines="6" ReadOnly="true" Variant="Variant.Outlined" />
+        @if (!string.IsNullOrEmpty(_htmlPreviewUrl))
+        {
+            <MudText Typo="Typo.caption" Class="mt-2 mud-text-secondary">@_htmlPreviewUrl</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _htmlDialogVisible = false)">Close</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyHtml">Copy</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public string FolderId { get; set; } = "";
+
+    private CommissionDatabase? _db;
+    private CommissionGroup? _group;
+    private Artist? _artist;
+    private List<ImageRow>? _rows;
+    private bool _scanning;
+    private bool _busy;
+    private string? _error;
+
+    private bool _htmlDialogVisible;
+    private readonly DialogOptions _htmlDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private string _htmlSnippet = "";
+    private string _htmlPreviewUrl = "";
+
+    private int SelectedCount => _rows?.Count(r => r.Selected) ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _db = await Store.LoadAsync();
+        _group = _db.Groups.FirstOrDefault(g => g.DriveFolderId == FolderId);
+        _artist = _group?.ArtistId is { } id ? _db.Artists.FirstOrDefault(a => a.Id == id) : null;
+        await ScanImages();
+    }
+
+    private async Task ScanImages()
+    {
+        if (_group is null) return;
+        _scanning = true;
+        _error = null;
+        try
+        {
+            var live = await Drive.ListImagesAsync(_group.DriveFolderId);
+            _rows = live.Select(f =>
+            {
+                var asset = _group.Images.FirstOrDefault(i => i.DriveFileId == f.Id);
+                return new ImageRow
+                {
+                    Live = f,
+                    Asset = asset,
+                    BlobName = asset?.BlobName ?? DefaultBlobName(f),
+                    AltText = asset?.AltText ?? _group.CharacterNames,
+                    ChapterIds = asset is null ? new List<string>() : new List<string>(asset.Ao3ChapterIds)
+                };
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _scanning = false;
+        }
+    }
+
+    private static bool IsDrifted(ImageRow row)
+        => row.Asset is { Synced: true } a && a.SyncedMd5 is not null && row.Live.Md5 is not null && a.SyncedMd5 != row.Live.Md5;
+
+    private static string PreviewUrl(DriveImageFile f)
+        => $"/preview/{f.Id}?type={Uri.EscapeDataString(f.MimeType)}";
+
+    private string DefaultBlobName(DriveImageFile f)
+    {
+        var ext = Path.GetExtension(f.Name);
+        if (string.IsNullOrEmpty(ext))
+        {
+            var slash = f.MimeType.IndexOf('/');
+            ext = slash >= 0 ? "." + f.MimeType[(slash + 1)..] : "";
+        }
+
+        var artist = _artist is null ? "" : Regex.Replace(_artist.Name, "[^A-Za-z0-9]", "");
+        return artist.Length > 0 ? $"{artist}/Placeholder{ext}" : $"Placeholder{ext}";
+    }
+
+    private async Task SyncSelected()
+    {
+        if (_rows is null || _db is null) return;
+        foreach (var row in _rows.Where(r => r.Selected).ToList())
+            await SyncOne(row, save: false);
+        await Store.SaveAsync(_db);
+        Snackbar.Add("Sync complete.", Severity.Success);
+    }
+
+    private Task SyncOne(ImageRow row) => SyncOne(row, save: true);
+
+    private async Task SyncOne(ImageRow row, bool save)
+    {
+        if (_db is null || _group is null) return;
+        if (string.IsNullOrWhiteSpace(row.BlobName))
+        {
+            Snackbar.Add($"Blob name required for {row.Live.Name}.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var bytes = await Drive.DownloadAsync(row.Live.Id);
+            await Blob.UploadImageAsync(row.BlobName, bytes, row.Live.MimeType);
+
+            var asset = row.Asset;
+            if (asset is null)
+            {
+                asset = new ImageAsset { DriveFileId = row.Live.Id };
+                _group.Images.Add(asset);
+                row.Asset = asset;
+            }
+            asset.SourceFileName = row.Live.Name;
+            asset.BlobName = row.BlobName;
+            asset.Width = row.Live.Width;
+            asset.Height = row.Live.Height;
+            asset.AltText = row.AltText;
+            asset.Synced = true;
+            asset.SyncedAt = DateTimeOffset.UtcNow;
+            asset.SyncedMd5 = row.Live.Md5;
+
+            if (save)
+            {
+                await Store.SaveAsync(_db);
+                Snackbar.Add($"Synced {row.BlobName}.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add($"Failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task UpdateChapters(ImageRow row, IEnumerable<string> values)
+    {
+        if (_db is null || row.Asset is null) return;
+        var list = values?.ToList() ?? new List<string>();
+        row.ChapterIds = list;
+        row.Asset.Ao3ChapterIds = new List<string>(list);
+        row.Asset.AddedToChapterIds.RemoveAll(id => !list.Contains(id));
+        foreach (var staleId in row.Asset.ChapterSections.Keys.Where(k => !list.Contains(k)).ToList())
+            row.Asset.ChapterSections.Remove(staleId);
+        await Store.SaveAsync(_db);
+    }
+
+    private string ChapterTitles(IReadOnlyList<string> ids)
+    {
+        if (_db is null || ids.Count == 0) return "None";
+        return string.Join(", ", _db.Chapters.Where(c => ids.Contains(c.Id)).Select(c => c.Title));
+    }
+
+    private async Task ShowHtml(ImageRow row)
+    {
+        if (_db is null || row.Asset?.BlobName is null) return;
+
+        // Reflect an alt-text edit into the record without forcing a re-upload.
+        if (row.Asset.AltText != row.AltText)
+        {
+            row.Asset.AltText = row.AltText;
+            await Store.SaveAsync(_db);
+        }
+
+        _htmlPreviewUrl = Blob.GetPublicUrl(row.Asset.BlobName);
+        _htmlSnippet = Html.BuildSnippet(row.Asset, _artist, _htmlPreviewUrl);
+        _htmlDialogVisible = true;
+    }
+
+    private async Task CopyHtml()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _htmlSnippet);
+            Snackbar.Add("Copied to clipboard.", Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add("Couldn't access the clipboard; copy manually.", Severity.Warning);
+        }
+    }
+
+    private sealed class ImageRow
+    {
+        public required DriveImageFile Live { get; init; }
+        public ImageAsset? Asset { get; set; }
+        public string BlobName { get; set; } = "";
+        public string AltText { get; set; } = "";
+        public bool Selected { get; set; }
+        public List<string> ChapterIds { get; set; } = new();
+    }
+}

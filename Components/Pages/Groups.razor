@@ -1,0 +1,152 @@
+@page "/groups"
+@inject IMetadataStore Store
+@inject IDriveScanner Drive
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Commission Groups</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h5">Commission Groups</MudText>
+    <MudSpacer />
+    <MudButton StartIcon="@Icons.Material.Filled.Refresh" Color="Color.Primary" Variant="Variant.Filled"
+               OnClick="Scan" Disabled="_scanning">@(_scanning ? "Scanning…" : "Scan Drive")</MudButton>
+</MudStack>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-4">@_error</MudAlert>
+}
+
+@if (_db is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_rows is null)
+{
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+        <MudText>Scanning Drive…</MudText>
+    </MudStack>
+}
+else if (_rows.Count == 0)
+{
+    <MudText>No commission group folders found.</MudText>
+}
+else
+{
+    <MudTable Items="_rows" Hover="true" Dense="true">
+        <HeaderContent>
+            <MudTh>Character(s)</MudTh>
+            <MudTh>Group</MudTh>
+            <MudTh>Artist</MudTh>
+            <MudTh>Synced</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Character(s)">@context.Scanned.CharacterNames</MudTd>
+            <MudTd DataLabel="Group">@context.Scanned.GroupName</MudTd>
+            <MudTd DataLabel="Artist">
+                <MudSelect T="string" Value="@context.ArtistId" ValueChanged="@(v => AssignArtist(context, v))"
+                           Clearable="true" Dense="true" Placeholder="Unassigned" Style="min-width:160px">
+                    @foreach (var artist in _db.Artists)
+                    {
+                        <MudSelectItem T="string" Value="@artist.Id">@artist.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudTd>
+            <MudTd DataLabel="Synced">
+                @if (context.Persisted is { } p && p.Images.Count > 0)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@p.Images.Count(i => i.Synced)/@p.Images.Count</MudChip>
+                }
+            </MudTd>
+            <MudTd Style="text-align:right">
+                <MudButton Size="Size.Small" EndIcon="@Icons.Material.Filled.ArrowForward" OnClick="@(() => Open(context))">Open</MudButton>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    private CommissionDatabase? _db;
+    private List<GroupRow>? _rows;
+    private bool _scanning;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _db = await Store.LoadAsync();
+        await Scan();
+    }
+
+    private async Task Scan()
+    {
+        if (_db is null) return;
+        _scanning = true;
+        _error = null;
+        try
+        {
+            var scanned = await Drive.ScanGroupsAsync();
+            _rows = scanned.Select(s =>
+            {
+                var persisted = _db.Groups.FirstOrDefault(g => g.DriveFolderId == s.DriveFolderId);
+                return new GroupRow { Scanned = s, Persisted = persisted, ArtistId = persisted?.ArtistId };
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _scanning = false;
+        }
+    }
+
+    private async Task AssignArtist(GroupRow row, string? artistId)
+    {
+        if (_db is null) return;
+        row.ArtistId = artistId;
+        var group = row.Persisted ??= EnsurePersisted(row.Scanned);
+        group.ArtistId = artistId;
+        await Store.SaveAsync(_db);
+        Snackbar.Add("Artist assigned.", Severity.Success);
+    }
+
+    private async Task Open(GroupRow row)
+    {
+        if (_db is null) return;
+        row.Persisted ??= EnsurePersisted(row.Scanned);
+        await Store.SaveAsync(_db);
+        Nav.NavigateTo($"/groups/{row.Scanned.DriveFolderId}");
+    }
+
+    private CommissionGroup EnsurePersisted(ScannedGroup scanned)
+    {
+        var group = _db!.Groups.FirstOrDefault(g => g.DriveFolderId == scanned.DriveFolderId);
+        if (group is null)
+        {
+            group = new CommissionGroup
+            {
+                DriveFolderId = scanned.DriveFolderId,
+                CharacterNames = scanned.CharacterNames,
+                GroupName = scanned.GroupName
+            };
+            _db.Groups.Add(group);
+        }
+        else
+        {
+            group.CharacterNames = scanned.CharacterNames;
+            group.GroupName = scanned.GroupName;
+        }
+        return group;
+    }
+
+    private sealed class GroupRow
+    {
+        public required ScannedGroup Scanned { get; init; }
+        public CommissionGroup? Persisted { get; set; }
+        public string? ArtistId { get; set; }
+    }
+}
