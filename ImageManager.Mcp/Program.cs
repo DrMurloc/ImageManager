@@ -11,36 +11,32 @@ builder.Services.Configure<AzureSearchOptions>(builder.Configuration.GetSection(
 builder.Services.AddSingleton<ISearchQuery, AzureSearchQuery>();
 
 // Entra OAuth is enabled only when configured, so the server can run no-auth locally for testing.
-var tenantId = builder.Configuration["AzureAd:TenantId"];
-var audience = builder.Configuration["AzureAd:Audience"];
-var authEnabled = !string.IsNullOrWhiteSpace(tenantId) && !string.IsNullOrWhiteSpace(audience);
+// Provider-agnostic OIDC: works with any authorization server that serves standard OAuth
+// metadata (Auth0, etc.). Authority is the issuer; Audience is the API identifier.
+var authority = builder.Configuration["Oauth:Authority"];
+var audience = builder.Configuration["Oauth:Audience"];
+var authEnabled = !string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience);
 
 if (authEnabled)
 {
-    var authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
-
     builder.Services.AddAuthentication(options =>
         {
-            // Resource-server: validate Entra JWTs, but emit MCP's resource_metadata challenge on 401.
+            // Resource-server: validate JWTs, but emit MCP's resource_metadata challenge on 401.
             options.DefaultChallengeScheme = McpAuthenticationDefaults.AuthenticationScheme;
             options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
         })
         .AddJwtBearer(options =>
         {
             options.Authority = authority;
-            options.TokenValidationParameters.ValidAudiences =
-                new[] { audience!, audience!.Replace("api://", "") };
+            options.Audience = audience;
         })
         .AddMcp(options =>
         {
-            // Entra rejects a token request whose RFC 8707 resource and scopes resolve to
-            // different resources, so derive BOTH from the app's audience (Application ID URI).
-            // A bare "mcp:tools" scope makes Entra fall back to Microsoft Graph -> AADSTS9010010.
             options.ResourceMetadata = new()
             {
                 Resource = audience!,
-                AuthorizationServers = { authority },
-                ScopesSupported = { $"{audience}/mcp:tools" }
+                AuthorizationServers = { authority! },
+                ScopesSupported = { "mcp:tools" }
             };
         });
 
