@@ -40,7 +40,17 @@ if (authEnabled)
             };
         });
 
-    builder.Services.AddAuthorization();
+    // Require the mcp:tools permission. With Auth0 RBAC, only users assigned that permission get
+    // it in their token, so this is the access gate. Auth0 ("Add Permissions in the Access Token")
+    // puts granted permissions in a "permissions" array claim; granted scopes are in "scope".
+    builder.Services.AddAuthorizationBuilder()
+        .AddPolicy("mcp", policy => policy.RequireAssertion(ctx =>
+        {
+            var permissions = ctx.User.FindAll("permissions").Select(c => c.Value);
+            var scopes = (ctx.User.FindFirst("scope")?.Value ?? string.Empty)
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return permissions.Contains("mcp:tools") || scopes.Contains("mcp:tools");
+        }));
 }
 
 builder.Services.AddMcpServer()
@@ -53,11 +63,11 @@ if (authEnabled)
 {
     app.UseAuthentication();
     app.UseAuthorization();
-    app.MapMcp().RequireAuthorization();
+    app.MapMcp().RequireAuthorization("mcp");
 }
 else
 {
-    // No auth — local/dev only. Do not expose publicly without AzureAd configured.
+    // No auth — local/dev only. Do not expose publicly without Oauth configured.
     app.MapMcp();
 }
 
