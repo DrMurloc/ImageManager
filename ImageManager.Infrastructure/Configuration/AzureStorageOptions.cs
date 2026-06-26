@@ -12,6 +12,9 @@ public sealed class AzureStorageOptions
     // Private container holding commissions.json and its backups.
     public string DataContainer { get; set; } = "appdata";
 
+    // Private container holding note files (markdown), one blob per note path.
+    public string NotesContainer { get; set; } = "notes";
+
     // Path prefix under the web container that images are uploaded beneath.
     public string HolisticPrefix { get; set; } = "Holistic/";
 

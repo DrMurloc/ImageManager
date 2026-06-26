@@ -1,14 +1,14 @@
 using ImageManager.Application;
-using ImageManager.Configuration;
 using ImageManager.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using ModelContextProtocol.AspNetCore.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Search read-side only: this service never touches Drive/Blob/Google, just the index.
-builder.Services.Configure<AzureSearchOptions>(builder.Configuration.GetSection(AzureSearchOptions.Section));
-builder.Services.AddSingleton<ISearchQuery, AzureSearchQuery>();
+// Same composition as the web app. The tools only resolve the search/notes/todos ports, so the
+// Drive/Google/blob-sync singletons stay unconstructed — but reusing this keeps wiring in one place.
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
 
 // Entra OAuth is enabled only when configured, so the server can run no-auth locally for testing.
 // Provider-agnostic OIDC: works with any authorization server that serves standard OAuth

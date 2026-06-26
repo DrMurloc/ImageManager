@@ -1,0 +1,223 @@
+@page "/todos"
+@using Microsoft.Extensions.Configuration
+@inject ITodoService TodoSvc
+@inject IConfiguration Config
+@inject ISnackbar Snackbar
+
+<PageTitle>Todos</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+    <MudText Typo="Typo.h5">Todos</MudText>
+    <MudSpacer />
+    <MudTextField @bind-Value="_filterBook" Label="Filter by book" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Style="max-width:220px" Immediate="true" OnKeyUp="FilterKey" />
+    <MudSwitch T="bool" Value="_includeDone" ValueChanged="OnIncludeDoneChanged" Label="Show done" Color="Color.Primary" />
+    <MudButton StartIcon="@Icons.Material.Filled.Refresh" OnClick="Load" Disabled="_busy">Refresh</MudButton>
+</MudStack>
+
+<MudText Typo="Typo.body2" Class="mb-4 mud-text-secondary">
+    Book-level and chapter-level todos in SQL — the same list the MCP connector reads and edits from your phone.
+</MudText>
+
+@if (!Configured)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-2">Todos:SqlConnectionString isn't configured — set it (User Secrets) to use todos.</MudAlert>
+}
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-2">@_error</MudAlert>
+}
+
+<MudPaper Class="pa-3 mb-4" Outlined="true">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="3">
+            <MudTextField @bind-Value="_addBook" Label="Book" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudTextField @bind-Value="_addTitle" Label="What needs doing" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="6" sm="2">
+            <MudNumericField @bind-Value="_addChapter" Label="Chapter (blank = book)" Variant="Variant.Outlined"
+                             Margin="Margin.Dense" Min="0" />
+        </MudItem>
+        <MudItem xs="6" sm="2">
+            <MudTextField @bind-Value="_addNotes" Label="Notes" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="1">
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true" OnClick="Add"
+                       Disabled="@(_busy || !Configured || string.IsNullOrWhiteSpace(_addBook) || string.IsNullOrWhiteSpace(_addTitle))">
+                Add
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_todos is null)
+{
+    @if (Configured)
+    {
+        <MudText>Loading…</MudText>
+    }
+}
+else if (_todos.Count == 0)
+{
+    <MudText class="mud-text-secondary">No todos@(string.IsNullOrWhiteSpace(_filterBook) ? "" : $" for '{_filterBook}'").</MudText>
+}
+else
+{
+    @foreach (var group in Grouped())
+    {
+        <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1">@group.Label</MudText>
+        <MudPaper Outlined="true">
+            <MudList T="Todo" Dense="true">
+                @foreach (var t in group.Items)
+                {
+                    <MudListItem T="Todo">
+                        <div class="d-flex align-center" style="gap:8px; width:100%">
+                            <MudCheckBox T="bool" Value="t.Done" ValueChanged="@(v => Toggle(t, v))" Dense="true" />
+                            <div class="flex-grow-1">
+                                <MudText Typo="Typo.body1"
+                                         Style="@(t.Done ? "text-decoration:line-through; opacity:.6" : "")">@t.Title</MudText>
+                                @if (!string.IsNullOrWhiteSpace(t.Notes))
+                                {
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@t.Notes</MudText>
+                                }
+                            </div>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                           OnClick="@(() => Delete(t))" Disabled="_busy" />
+                        </div>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudPaper>
+    }
+}
+
+@code {
+    private List<Todo>? _todos;
+    private string _filterBook = "";
+    private bool _includeDone;
+
+    private string _addBook = "";
+    private string _addTitle = "";
+    private int? _addChapter;
+    private string _addNotes = "";
+
+    private bool _busy;
+    private string? _error;
+
+    private bool Configured => !string.IsNullOrWhiteSpace(Config["Todos:SqlConnectionString"]);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Configured)
+            await Load();
+    }
+
+    private async Task Load()
+    {
+        if (!Configured) return;
+        _error = null;
+        _busy = true;
+        try
+        {
+            var filter = new TodoFilter(
+                Book: string.IsNullOrWhiteSpace(_filterBook) ? null : _filterBook.Trim(),
+                IncludeDone: _includeDone);
+            _todos = (await TodoSvc.ListAsync(filter)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnIncludeDoneChanged(bool value)
+    {
+        _includeDone = value;
+        await Load();
+    }
+
+    private async Task FilterKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await Load();
+    }
+
+    private async Task Add()
+    {
+        _busy = true;
+        try
+        {
+            await TodoSvc.AddAsync(_addBook, _addTitle, _addChapter, _addNotes);
+            Snackbar.Add("Todo added.", Severity.Success);
+            _addTitle = "";
+            _addChapter = null;
+            _addNotes = "";
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Add failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Toggle(Todo todo, bool done)
+    {
+        try
+        {
+            await TodoSvc.SetDoneAsync(todo.Id, done);
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Update failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task Delete(Todo todo)
+    {
+        _busy = true;
+        try
+        {
+            await TodoSvc.DeleteAsync(todo.Id);
+            Snackbar.Add("Todo deleted.", Severity.Success);
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private IEnumerable<(string Label, List<Todo> Items)> Grouped()
+    {
+        if (_todos is null)
+            yield break;
+
+        var bookLevel = _todos.Where(t => t.ChapterNumber is null)
+            .OrderBy(t => t.Book).ThenBy(t => t.Order).ToList();
+        if (bookLevel.Count > 0)
+            yield return ("Book-level", bookLevel);
+
+        foreach (var group in _todos.Where(t => t.ChapterNumber is not null)
+            .GroupBy(t => new { t.Book, t.ChapterNumber })
+            .OrderBy(g => g.Key.Book).ThenBy(g => g.Key.ChapterNumber))
+        {
+            yield return ($"{group.Key.Book} — Chapter {group.Key.ChapterNumber}",
+                group.OrderBy(t => t.Order).ToList());
+        }
+    }
+}

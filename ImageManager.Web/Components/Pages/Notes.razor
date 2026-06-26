@@ -1,0 +1,333 @@
+@page "/notes"
+@inject INoteService NoteSvc
+@inject IOptions<AzureStorageOptions> StorageOptions
+@inject IOptions<AzureSearchOptions> SearchOptions
+@inject ISnackbar Snackbar
+
+<PageTitle>Notes</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+    <MudText Typo="Typo.h5">Notes</MudText>
+    <MudSpacer />
+    <MudButton StartIcon="@Icons.Material.Filled.NoteAdd" OnClick="NewNote" Disabled="@(_busy || !StorageConfigured)">New note</MudButton>
+    <MudButton StartIcon="@Icons.Material.Filled.Refresh" OnClick="@(() => Load(_prefix))" Disabled="_busy">Refresh</MudButton>
+    <MudButton StartIcon="@Icons.Material.Filled.ManageSearch" OnClick="ReindexAll"
+               Disabled="@(_busy || !SearchConfigured)">Reindex all</MudButton>
+</MudStack>
+
+<MudText Typo="Typo.body2" Class="mb-4 mud-text-secondary">
+    Markdown files in blob storage — searchable from here and from the MCP connector on your phone.
+    The blob name is the path, so folders come from the path itself (e.g. <code>books/connected/character/astrid.md</code>).
+</MudText>
+
+@if (!StorageConfigured)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-2">AzureStorage:ConnectionString isn't configured — set it (User Secrets) to use notes.</MudAlert>
+}
+@if (!SearchConfigured)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-2">AzureSearch isn't configured — notes will save, but search/reindex are disabled until it is.</MudAlert>
+}
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-2">@_error</MudAlert>
+}
+
+<MudGrid>
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-3" Outlined="true">
+            <MudTextField @bind-Value="_search" Label="Search notes" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                          OnAdornmentClick="RunSearch" OnKeyUp="SearchKey" Immediate="true" Disabled="@(!SearchConfigured)" />
+
+            @if (_hits is not null)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                    <MudText Typo="Typo.subtitle2">Results (@_hits.Count)</MudText>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" OnClick="ClearSearch">Clear</MudButton>
+                </MudStack>
+                <MudList T="string" Dense="true">
+                    @foreach (var hit in _hits)
+                    {
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.Description" OnClick="@(() => OpenNote(hit.Path))">
+                            @hit.Path
+                        </MudListItem>
+                    }
+                    @if (_hits.Count == 0)
+                    {
+                        <MudListItem T="string" Disabled="true">No matches.</MudListItem>
+                    }
+                </MudList>
+                <MudDivider Class="my-2" />
+            }
+
+            <div class="d-flex flex-wrap align-center py-1" style="gap:4px">
+                <MudLink Typo="Typo.body2" OnClick="@(() => Load(string.Empty))">root</MudLink>
+                @foreach (var crumb in _crumbs)
+                {
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">/</MudText>
+                    <MudLink Typo="Typo.body2" OnClick="@(() => Load(crumb.Path))">@crumb.Text</MudLink>
+                }
+            </div>
+
+            <MudList T="string" Dense="true">
+                @if (!string.IsNullOrEmpty(_prefix))
+                {
+                    <MudListItem T="string" Icon="@Icons.Material.Filled.ArrowUpward" OnClick="GoUp">..</MudListItem>
+                }
+                @if (_listing is not null)
+                {
+                    @foreach (var folder in _listing.Folders)
+                    {
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.Folder" OnClick="@(() => Load(folder))">
+                            @LeafName(folder)/
+                        </MudListItem>
+                    }
+                    @foreach (var note in _listing.Notes)
+                    {
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.Description" OnClick="@(() => OpenNote(note.Path))">
+                            @note.Title
+                        </MudListItem>
+                    }
+                    @if (_listing.Folders.Count == 0 && _listing.Notes.Count == 0)
+                    {
+                        <MudListItem T="string" Disabled="true">Empty folder.</MudListItem>
+                    }
+                }
+            </MudList>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="7">
+        @if (_editing)
+        {
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudTextField @bind-Value="_editPath" Label="Path" Variant="Variant.Outlined" Margin="Margin.Dense"
+                              ReadOnly="@(!_isNew)" HelperText="@(_isNew ? "e.g. books/connected/character/astrid.md" : null)" />
+                <MudTextField @bind-Value="_editContent" Label="Markdown" Variant="Variant.Outlined" Class="mt-3"
+                              Lines="20" />
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-3">
+                    <MudButton StartIcon="@Icons.Material.Filled.Save" Color="Color.Primary" Variant="Variant.Filled"
+                               OnClick="Save" Disabled="@(_busy || string.IsNullOrWhiteSpace(_editPath))">Save</MudButton>
+                    <MudSpacer />
+                    @if (!_isNew)
+                    {
+                        <MudButton StartIcon="@Icons.Material.Filled.Delete" Color="Color.Error"
+                                   OnClick="Delete" Disabled="_busy">Delete</MudButton>
+                    }
+                    <MudButton OnClick="CloseEditor" Disabled="_busy">Close</MudButton>
+                </MudStack>
+            </MudPaper>
+        }
+        else
+        {
+            <MudPaper Class="pa-6 d-flex align-center justify-center mud-text-secondary" Outlined="true" Style="min-height:200px">
+                <MudText>Select a note to edit, or create a new one.</MudText>
+            </MudPaper>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string _prefix = "";
+    private NoteListing? _listing;
+    private List<(string Text, string Path)> _crumbs = new();
+
+    private string _search = "";
+    private IReadOnlyList<NoteSearchHit>? _hits;
+
+    private bool _editing;
+    private bool _isNew;
+    private string _editPath = "";
+    private string _editContent = "";
+
+    private bool _busy;
+    private string? _error;
+
+    private bool StorageConfigured => !string.IsNullOrWhiteSpace(StorageOptions.Value.ConnectionString);
+    private bool SearchConfigured =>
+        !string.IsNullOrWhiteSpace(SearchOptions.Value.Endpoint) && !string.IsNullOrWhiteSpace(SearchOptions.Value.ApiKey);
+
+    private static string LeafName(string path)
+    {
+        var i = path.LastIndexOf('/');
+        return i < 0 ? path : path[(i + 1)..];
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (StorageConfigured)
+            await Load("");
+    }
+
+    private async Task Load(string prefix)
+    {
+        if (!StorageConfigured) return;
+        _error = null;
+        _busy = true;
+        try
+        {
+            _prefix = prefix;
+            _listing = await NoteSvc.ListAsync(prefix);
+            BuildCrumbs();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void BuildCrumbs()
+    {
+        _crumbs = new List<(string Text, string Path)>();
+        var path = "";
+        foreach (var segment in _prefix.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            path = path.Length == 0 ? segment : $"{path}/{segment}";
+            _crumbs.Add((segment, path));
+        }
+    }
+
+    private void GoUp()
+    {
+        var i = _prefix.LastIndexOf('/');
+        _ = Load(i < 0 ? "" : _prefix[..i]);
+    }
+
+    private async Task OpenNote(string path)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            var note = await NoteSvc.ReadAsync(path);
+            if (note is null)
+            {
+                Snackbar.Add($"Note '{path}' not found.", Severity.Warning);
+                return;
+            }
+            _editPath = note.Path;
+            _editContent = note.Content;
+            _isNew = false;
+            _editing = true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void NewNote()
+    {
+        _editPath = string.IsNullOrEmpty(_prefix) ? "" : $"{_prefix}/";
+        _editContent = "";
+        _isNew = true;
+        _editing = true;
+    }
+
+    private async Task Save()
+    {
+        _busy = true;
+        try
+        {
+            await NoteSvc.SaveAsync(_editPath, _editContent);
+            Snackbar.Add($"Saved '{_editPath}'.", Severity.Success);
+            _isNew = false;
+            await Load(_prefix);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Delete()
+    {
+        _busy = true;
+        try
+        {
+            var deleted = await NoteSvc.DeleteAsync(_editPath);
+            Snackbar.Add(deleted ? $"Deleted '{_editPath}'." : "Nothing to delete.",
+                deleted ? Severity.Success : Severity.Warning);
+            CloseEditor();
+            await Load(_prefix);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void CloseEditor()
+    {
+        _editing = false;
+        _editPath = "";
+        _editContent = "";
+    }
+
+    private async Task ReindexAll()
+    {
+        if (!SearchConfigured) return;
+        _busy = true;
+        try
+        {
+            var count = await NoteSvc.ReindexAllAsync();
+            Snackbar.Add($"Reindexed {count} note(s).", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Reindex failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RunSearch()
+    {
+        if (!SearchConfigured || string.IsNullOrWhiteSpace(_search)) return;
+        _busy = true;
+        try
+        {
+            _hits = await NoteSvc.SearchAsync(_search, 10);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await RunSearch();
+    }
+
+    private void ClearSearch()
+    {
+        _search = "";
+        _hits = null;
+    }
+}

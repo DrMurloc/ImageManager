@@ -11,4 +11,7 @@ public sealed class AzureSearchOptions
     public string ApiKey { get; set; } = "";
 
     public string IndexName { get; set; } = "book-chapters";
+
+    // Separate index for notes, so note search never conflates with chapter search.
+    public string NotesIndexName { get; set; } = "notes";
 }

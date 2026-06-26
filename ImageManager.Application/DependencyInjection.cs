@@ -12,6 +12,8 @@ public static class DependencyInjection
         services.AddScoped<IImageSyncService, ImageSyncService>();
         services.AddScoped<IDocumentMigrationService, DocumentMigrationService>();
         services.AddScoped<IBookSearchIndexer, BookSearchIndexer>();
+        services.AddScoped<INoteService, NoteService>();
+        services.AddScoped<ITodoService, TodoService>();
         return services;
     }
 }

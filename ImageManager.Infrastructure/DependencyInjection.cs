@@ -1,6 +1,7 @@
 using Azure.Storage.Blobs;
 using ImageManager.Application;
 using ImageManager.Configuration;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -36,6 +37,22 @@ public static class DependencyInjection
         services.AddSingleton<IDocxTextExtractor, OpenXmlDocxTextExtractor>();
         services.AddSingleton<ISearchIndex, AzureSearchIndex>();
         services.AddSingleton<ISearchQuery, AzureSearchQuery>();
+        services.AddSingleton<INoteStore, BlobNoteStore>();
+        services.AddSingleton<INoteSearchIndex, AzureNoteSearchIndex>();
+        services.AddSingleton<INoteSearchQuery, AzureNoteSearchQuery>();
+
+        // Todos live in SQL via EF Core. Only wire the real repository when a connection string is
+        // present, so the app still boots locally (and the MCP) without SQL configured.
+        var todoConnection = configuration["Todos:SqlConnectionString"];
+        if (!string.IsNullOrWhiteSpace(todoConnection))
+        {
+            services.AddDbContext<BooksDbContext>(options => options.UseSqlServer(todoConnection));
+            services.AddScoped<ITodoRepository, EfTodoRepository>();
+        }
+        else
+        {
+            services.AddScoped<ITodoRepository, UnconfiguredTodoRepository>();
+        }
 
         return services;
     }

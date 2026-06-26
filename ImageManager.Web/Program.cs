@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -86,6 +87,22 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
+
+// Apply EF Core migrations for the todos (books) database when SQL is configured. Log-and-continue
+// so a SQL outage can't take down the rest of the app — todo features just stay unavailable.
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Todos:SqlConnectionString"]))
+{
+    using var scope = app.Services.CreateScope();
+    try
+    {
+        await scope.ServiceProvider.GetRequiredService<ImageManager.Infrastructure.BooksDbContext>()
+            .Database.MigrateAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Todos database migration failed; todo features may be unavailable.");
+    }
+}
 
 app.UseForwardedHeaders();
 

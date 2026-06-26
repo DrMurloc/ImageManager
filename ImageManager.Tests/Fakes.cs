@@ -128,3 +128,135 @@ public sealed class InMemoryMetadataStore : IMetadataStore
         return Task.CompletedTask;
     }
 }
+
+public sealed class FakeNoteStore : INoteStore
+{
+    public readonly Dictionary<string, string> Files = new(StringComparer.Ordinal);
+
+    public Task<string?> ReadAsync(NotePath path, CancellationToken ct = default)
+        => Task.FromResult(Files.TryGetValue(path.Value, out var content) ? content : null);
+
+    public Task WriteAsync(NotePath path, string content, CancellationToken ct = default)
+    {
+        Files[path.Value] = content;
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> DeleteAsync(NotePath path, CancellationToken ct = default)
+        => Task.FromResult(Files.Remove(path.Value));
+
+    public Task<bool> ExistsAsync(NotePath path, CancellationToken ct = default)
+        => Task.FromResult(Files.ContainsKey(path.Value));
+
+    public Task<NoteListing> ListAsync(string prefix, CancellationToken ct = default)
+    {
+        var p = string.IsNullOrEmpty(prefix) ? "" : prefix.TrimEnd('/') + "/";
+        var folders = new HashSet<string>(StringComparer.Ordinal);
+        var notes = new List<NoteEntry>();
+        foreach (var key in Files.Keys)
+        {
+            if (!key.StartsWith(p, StringComparison.Ordinal)) continue;
+            var rest = key[p.Length..];
+            var slash = rest.IndexOf('/');
+            if (slash < 0)
+                notes.Add(new NoteEntry(key, NotePath.Parse(key).Title));
+            else
+                folders.Add(p + rest[..slash]);
+        }
+        return Task.FromResult(new NoteListing(prefix ?? "",
+            folders.OrderBy(f => f, StringComparer.Ordinal).ToList(),
+            notes.OrderBy(n => n.Path, StringComparer.Ordinal).ToList()));
+    }
+
+    public Task<IReadOnlyList<NotePath>> ListAllAsync(string prefix, CancellationToken ct = default)
+    {
+        var p = string.IsNullOrEmpty(prefix) ? "" : prefix.TrimEnd('/') + "/";
+        IReadOnlyList<NotePath> all = Files.Keys
+            .Where(k => k.StartsWith(p, StringComparison.Ordinal))
+            .Select(NotePath.Parse)
+            .ToList();
+        return Task.FromResult(all);
+    }
+}
+
+public sealed class FakeNoteSearchIndex : INoteSearchIndex
+{
+    public int EnsureCalls;
+    public readonly Dictionary<string, string> Indexed = new(StringComparer.Ordinal);
+    public readonly List<string> Deleted = new();
+
+    public Task EnsureIndexAsync(CancellationToken ct = default)
+    {
+        EnsureCalls++;
+        return Task.CompletedTask;
+    }
+
+    public Task IndexAsync(NotePath path, string content, CancellationToken ct = default)
+    {
+        Indexed[path.Value] = content;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(NotePath path, CancellationToken ct = default)
+    {
+        Deleted.Add(path.Value);
+        Indexed.Remove(path.Value);
+        return Task.CompletedTask;
+    }
+}
+
+public sealed class FakeNoteSearchQuery : INoteSearchQuery
+{
+    public List<NoteSearchHit> Hits = new();
+    public string? LastQuery;
+    public int LastTop;
+
+    public Task<IReadOnlyList<NoteSearchHit>> SearchAsync(string query, int top, CancellationToken ct = default)
+    {
+        LastQuery = query;
+        LastTop = top;
+        return Task.FromResult((IReadOnlyList<NoteSearchHit>)Hits);
+    }
+}
+
+public sealed class FakeTodoRepository : ITodoRepository
+{
+    public readonly List<Todo> Items = new();
+
+    public Task<IReadOnlyList<Todo>> ListAsync(TodoFilter filter, CancellationToken ct = default)
+    {
+        IEnumerable<Todo> q = Items;
+        if (filter.Book is not null)
+            q = q.Where(t => string.Equals(t.Book, filter.Book, StringComparison.OrdinalIgnoreCase));
+        if (filter.ChapterNumber is not null)
+            q = q.Where(t => t.ChapterNumber == filter.ChapterNumber);
+        if (filter.Scope is not null)
+            q = q.Where(t => t.Scope == filter.Scope);
+        if (!filter.IncludeDone)
+            q = q.Where(t => !t.Done);
+
+        IReadOnlyList<Todo> result = q.OrderBy(t => t.Order).ThenBy(t => t.CreatedUtc).ToList();
+        return Task.FromResult(result);
+    }
+
+    public Task<Todo?> GetAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(Items.FirstOrDefault(t => t.Id == id));
+
+    public Task AddAsync(Todo todo, CancellationToken ct = default)
+    {
+        Items.Add(todo);
+        return Task.CompletedTask;
+    }
+
+    // In-memory entities are tracked by reference, so the service's mutations are already visible.
+    public Task UpdateAsync(Todo todo, CancellationToken ct = default) => Task.CompletedTask;
+
+    public Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var existing = Items.FirstOrDefault(t => t.Id == id);
+        if (existing is null)
+            return Task.FromResult(false);
+        Items.Remove(existing);
+        return Task.FromResult(true);
+    }
+}
